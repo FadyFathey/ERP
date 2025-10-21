@@ -1,0 +1,163 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
+    }
+
+    // Basic editor role: can create/update operational docs
+    function isEditor() {
+      return isSignedIn() && (
+        isAdmin() || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'editor')
+      );
+    }
+
+    // Users: admin can read/write own user doc and others; non-admin can read own doc only
+    match /users/{userId} {
+      allow read: if isAdmin() || (isSignedIn() && userId == request.auth.uid);
+      allow write: if isAdmin() || (isSignedIn() && userId == request.auth.uid);
+    }
+
+    // Helper: only the 'quantity' field is being changed
+    function onlyQuantityChanged() {
+      return resource.data.diff(request.resource.data).changedKeys().hasOnly(['quantity']);
+    }
+
+    // Products: admins full control; editors can read and safely adjust quantity only (non-negative)
+    match /products/{productId} {
+      allow read: if isAdmin() || isEditor();
+      allow create, delete: if isAdmin();
+      allow update: if (
+        // Admins can update anything
+        isAdmin()
+      ) || (
+        // Editors can only change 'quantity' and it must remain >= 0
+        isEditor() && onlyQuantityChanged() &&
+        request.resource.data.quantity is number && request.resource.data.quantity >= 0
+      );
+    }
+
+    // Invoices: admin-only; allow create/update/delete; unit business rules enforced client-side
+    match /invoices/{invoiceId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Payments: admin-only
+    match /payments/{paymentId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Purchases: allow admins and editors; non-negative quantities enforced via rules
+    match /purchases/{purchaseId} {
+      allow read: if isAdmin() || isEditor();
+      allow create, update: if (isAdmin() || isEditor()) &&
+        (
+          request.resource.data.items is list &&
+          request.resource.data.items.size() > 0
+        );
+      // Restrict deletes to admins only
+      allow delete: if isAdmin();
+    }
+
+    // Purchase payments: admin-only
+    match /purchasePayments/{paymentId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Stock movements: admins and editors can create/update; delete admin-only
+    match /stockMovements/{movementId} {
+      allow read: if isAdmin() || isEditor();
+      allow create, update: if isAdmin() || isEditor();
+      allow delete: if isAdmin();
+    }
+
+    // Counters (e.g., invoice numbering): allow read and update for editors; delete admin-only
+    match /counters/{counterId} {
+      allow read: if isAdmin() || isEditor();
+      allow create, update: if isAdmin() || isEditor();
+      allow delete: if isAdmin();
+    }
+
+    // Stock Outs: admins/editors can read/create/update; delete admin-only
+    match /stockOuts/{stockOutId} {
+      allow read: if isAdmin() || isEditor();
+      allow create, update: if isAdmin() || isEditor();
+      allow delete: if isAdmin();
+    }
+
+    // Petty Cash Boxes: admins/editors can create/read/update; delete admin-only
+    match /pettyCashBoxes/{boxId} {
+      allow read: if isAdmin() || isEditor();
+      allow create: if (isAdmin() || isEditor()) &&
+        request.resource.data.initialAmount is number &&
+        request.resource.data.initialAmount > 0 &&
+        request.resource.data.status == 'active';
+      allow update: if (isAdmin() || isEditor()) &&
+        (
+          // Allow updating name, initialAmount, currentBalance, and updatedAt
+          request.resource.data.diff(resource.data).changedKeys().hasOnly(['name', 'initialAmount', 'currentBalance', 'updatedAt']) ||
+          // Allow closing the box (changing status to closed)
+          (request.resource.data.status == 'closed' && resource.data.status == 'active') ||
+          // Allow updating currentBalance only
+          request.resource.data.diff(resource.data).changedKeys().hasOnly(['currentBalance', 'updatedAt']) ||
+          // Allow auto-closing when balance reaches zero (status, endDate, currentBalance, updatedAt)
+          (request.resource.data.status == 'closed' && 
+           request.resource.data.diff(resource.data).changedKeys().hasAll(['status', 'endDate', 'currentBalance', 'updatedAt']) &&
+           request.resource.data.diff(resource.data).changedKeys().hasOnly(['status', 'endDate', 'currentBalance', 'updatedAt']))
+        );
+      allow delete: if isAdmin();
+    }
+
+    // Expenses: admins/editors can create/read; linked to petty cash boxes
+    match /expenses/{expenseId} {
+      allow read: if isAdmin() || isEditor();
+      allow create: if (isAdmin() || isEditor()) &&
+        request.resource.data.amount is number &&
+        request.resource.data.amount > 0 &&
+        (
+          // If boxId exists, verify the box is active
+          !('boxId' in request.resource.data) ||
+          (
+            exists(/databases/$(database)/documents/pettyCashBoxes/$(request.resource.data.boxId)) &&
+            get(/databases/$(database)/documents/pettyCashBoxes/$(request.resource.data.boxId)).data.status == 'active'
+          )
+        );
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Employees: admins/editors can create/read/update; delete admin-only
+    match /employees/{employeeId} {
+      allow read: if isAdmin() || isEditor();
+      allow create: if (isAdmin() || isEditor()) &&
+        request.resource.data.name is string &&
+        request.resource.data.weeklyLimit is number &&
+        request.resource.data.weeklyLimit > 0;
+      allow update: if isAdmin() || isEditor();
+      allow delete: if isAdmin();
+    }
+
+    // Balance Changes: track deposits and withdrawals for petty cash boxes
+    match /balanceChanges/{changeId} {
+      allow read: if isAdmin() || isEditor();
+      allow create: if (isAdmin() || isEditor()) &&
+        request.resource.data.boxId is string &&
+        request.resource.data.type is string &&
+        request.resource.data.amount is number &&
+        request.resource.data.amount > 0;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+  }
+}
