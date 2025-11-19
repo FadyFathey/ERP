@@ -9,6 +9,9 @@
     <!-- Chart.js CDN for reports -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- Lucide Icons CDN for modern icons -->
+    <!-- PDF Generation Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     
     <script>
         tailwind.config = {
@@ -109,6 +112,44 @@
             border-bottom: none;
         }
         
+        /* Channel Filter Buttons Styling */
+        .channel-filter-btn {
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .channel-filter-btn.active {
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            color: white;
+            box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.3);
+            transform: translateY(-1px);
+        }
+        
+        .channel-filter-btn:not(.active):hover {
+            background: linear-gradient(135deg, #f3f4f6, #e5e7eb);
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.1);
+        }
+        
+        .channel-filter-btn:not(.active):active {
+            transform: translateY(0);
+        }
+        
+        .channel-filter-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+            transition: left 0.5s;
+        }
+        
+        .channel-filter-btn:hover::before {
+            left: 100%;
+        }
+        
         /* Loading animation for status changes */
         .status-changing {
             animation: statusChange 0.8s ease-in-out;
@@ -159,12 +200,14 @@
             body * {
                 visibility: hidden;
             }
-            /* Allow invoice and stock-out print modals to render during printing */
+            /* Allow invoice, stock-out, expense, and purchase details print modals to render during printing */
             #printable-invoice-modal, #printable-invoice-modal *,
-            #printable-stock-out-modal, #printable-stock-out-modal * {
+            #printable-stock-out-modal, #printable-stock-out-modal *,
+            #printable-expense-modal, #printable-expense-modal *,
+            #printable-purchase-details-modal, #printable-purchase-details-modal * {
                 visibility: visible;
             }
-            #printable-invoice-modal, #printable-stock-out-modal {
+            #printable-invoice-modal, #printable-stock-out-modal, #printable-expense-modal, #printable-purchase-details-modal {
                 position: static !important;
                 box-shadow: none !important;
                 border: none !important;
@@ -564,13 +607,26 @@
                     <div class="flex justify-between items-center mb-6">
                         <h2 class="text-2xl font-semibold">إدارة المبيعات والفواتير</h2>
                         <div class="flex items-center space-x-4 space-x-reverse">
-                            <select id="channel-filter" class="px-3 py-2 border rounded-md focus:outline-none">
-                                <option value="">جميع القنوات</option>
-                                <option value="المتجر الفعلي">المتجر الفعلي</option>
-                                <option value="Website">Website</option>
-                                <option value="Amazon">Amazon</option>
-                            </select>
                             <button id="add-invoice-btn" class="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600">إضافة فاتورة جديدة</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Channel Filter Buttons -->
+                    <div class="bg-white p-4 rounded-lg shadow-sm mb-6">
+                        <div class="flex items-center justify-center space-x-2 space-x-reverse">
+                            <span class="text-sm font-medium text-gray-700 mr-4">تصفية حسب القناة:</span>
+                            <button id="filter-all-channels" class="channel-filter-btn active px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 bg-blue-500 text-white hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-300">
+                                جميع القنوات
+                            </button>
+                            <button id="filter-amazon" class="channel-filter-btn px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 bg-gray-100 text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-300" data-channel="Amazon">
+                                Amazon
+                            </button>
+                            <button id="filter-website" class="channel-filter-btn px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 bg-gray-100 text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-300" data-channel="Website">
+                                Website
+                            </button>
+                            <button id="filter-showroom" class="channel-filter-btn px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 bg-gray-100 text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-300" data-channel="المتجر الفعلي">
+                                Showroom
+                            </button>
                         </div>
                     </div>
                     <!-- Search and Filter Section -->
@@ -645,6 +701,8 @@
                                     <option value="total-asc">المبلغ (الأصغر)</option>
                                     <option value="customer-asc">اسم العميل (أ-ي)</option>
                                     <option value="customer-desc">اسم العميل (ي-أ)</option>
+                                    <option value="manualInvoiceNumber-asc">رقم الفاتورة اليدوي (أ-ي)</option>
+                                    <option value="manualInvoiceNumber-desc">رقم الفاتورة اليدوي (ي-أ)</option>
                                 </select>
                             </div>
                         </div>
@@ -815,6 +873,7 @@
                         <table class="w-full text-right">
                             <thead class="bg-gray-50 border-b">
                                 <tr>
+                                    <th class="p-3">الرقم التسلسلي</th>
                                     <th class="p-3">رقم الفاتورة الداخلي</th>
                                     <th class="p-3">رقم فاتورة المورد</th>
                                     <th class="p-3">المورد</th>
@@ -942,6 +1001,7 @@
                                 <table class="w-full text-right">
                                     <thead class="bg-gray-50 border-b">
                                         <tr>
+                                            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
                                             <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">التاريخ</th>
                                             <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">الفئة</th>
                                             <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">الوصف</th>
@@ -954,7 +1014,7 @@
                                     </thead>
                                     <tbody id="expenses-table-body" class="bg-white divide-y divide-gray-200">
                                         <tr>
-                                            <td colspan="8" class="p-4 text-center text-gray-500">جاري تحميل المصروفات...</td>
+                                            <td colspan="9" class="p-4 text-center text-gray-500">جاري تحميل المصروفات...</td>
                                         </tr>
                                     </tbody>
                                 </table>
@@ -1394,6 +1454,20 @@
                         + إضافة بند جديد
                     </button>
                     
+                    <!-- Discount Section -->
+                    <div class="mt-4 pt-4 border-t">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="flex flex-col space-y-2">
+                                <label for="invoice-discount" class="text-sm text-gray-600">الخصم (ج.م)</label>
+                                <input id="invoice-discount" type="number" min="0" step="0.01" placeholder="0.00" class="w-full px-3 py-2 text-gray-700 border rounded-lg focus:outline-none">
+                            </div>
+                            <div class="flex flex-col space-y-2">
+                                <label for="invoice-discount-percent" class="text-sm text-gray-600">الخصم (%)</label>
+                                <input id="invoice-discount-percent" type="number" min="0" max="100" step="0.01" placeholder="0.00" class="w-full px-3 py-2 text-gray-700 border rounded-lg focus:outline-none">
+                            </div>
+                        </div>
+                    </div>
+                    
                     <div class="mt-4 pt-4 border-t flex justify-between items-center font-bold text-lg">
                         <span>الإجمالي:</span>
                         <span id="invoice-calculated-total">0.00 ج.م</span>
@@ -1458,7 +1532,7 @@
             <div id="invoice-to-print" class="p-8">
                 <!-- Invoice Header -->
                 <div class="text-center mb-6">
-                    <h1 class="text-2xl font-bold">فاتورة مبيعات</h1>
+                    <h1 id="print-invoice-title" class="text-2xl font-bold">فاتورة مبيعات</h1>
                     <p id="print-invoice-id" class="text-gray-600 mt-2"></p>
                     <p id="print-invoice-date" class="text-gray-600"></p>
                 </div>
@@ -1497,7 +1571,15 @@
                 
                 <!-- Invoice Total -->
                 <div class="mt-6 flex justify-end">
-                    <div class="w-1/2 sm:w-1/3">
+                    <div class="w-1/2 sm:w-1/3 space-y-2">
+                        <div class="flex justify-between">
+                            <span>Subtotal:</span>
+                            <span id="print-invoice-subtotal"></span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>Discount:</span>
+                            <span id="print-invoice-discount"></span>
+                        </div>
                         <div class="flex justify-between border-t-2 pt-2">
                             <span class="font-bold">Total Amount:</span>
                             <span id="print-invoice-total" class="font-bold"></span>
@@ -1539,7 +1621,7 @@
 
     <!-- View Purchase Modal -->
     <div id="view-purchase-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center hidden z-50 no-print">
-        <div class="relative mx-auto p-5 border w-full max-w-4xl shadow-lg rounded-md bg-white">
+        <div class="relative mx-auto p-5 border w-full max-w-4xl shadow-lg rounded-md bg-white max-h-[90vh] overflow-y-auto">
             <div class="mt-3 flex justify-between items-center">
                 <h3 class="text-lg leading-6 font-medium text-gray-900">عرض فاتورة الشراء</h3>
                 <button id="close-view-purchase-modal-btn" class="text-gray-400 hover:text-gray-600">
@@ -1548,7 +1630,7 @@
                     </svg>
                 </button>
             </div>
-            <div id="view-purchase-content" class="mt-4 px-4 py-3 text-right space-y-4">
+            <div id="view-purchase-content" class="mt-4 px-4 py-3 text-right space-y-4 overflow-y-auto max-h-[70vh]">
                 <!-- Purchase details will be populated here -->
             </div>
              <div class="items-center px-4 py-3 bg-gray-50 rounded-b-md mt-4">
@@ -1561,8 +1643,8 @@
 
     <!-- Printable Purchase Invoice Modal -->
     <div id="printable-purchase-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center hidden z-50">
-        <div class="relative mx-auto p-5 border w-full max-w-2xl shadow-lg rounded-md bg-white">
-            <div id="purchase-to-print" class="p-8">
+        <div class="relative mx-auto p-5 border w-full max-w-2xl shadow-lg rounded-md bg-white max-h-[90vh] overflow-y-auto">
+            <div id="purchase-to-print" class="p-8 overflow-y-auto max-h-[70vh]">
                 <!-- Purchase Invoice Header -->
                 <div class="flex justify-end text-right border-b pb-4">
                     <div>
@@ -2086,11 +2168,225 @@
         </div>
     </div>
 
+    <!-- Expense Details Modal -->
+    <div id="expense-details-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center hidden z-50 no-print">
+        <div class="relative mx-auto p-5 border w-full max-w-2xl shadow-lg rounded-md bg-white max-h-[90vh] overflow-y-auto">
+            <div class="mt-3">
+                <h3 class="text-lg leading-6 font-medium text-gray-900 text-center">تفاصيل المصروف</h3>
+                
+                <!-- Expense Information Section -->
+                <div class="mt-4 px-4 py-3">
+                    <div class="bg-blue-50 p-4 rounded-lg mb-4">
+                        <h4 class="text-md font-semibold text-blue-800 mb-3">معلومات المصروف الأساسية</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="text-sm text-gray-600">الفئة:</label>
+                                <p id="print-expense-category" class="font-semibold text-gray-800"></p>
+                            </div>
+                            <div>
+                                <label class="text-sm text-gray-600">المبلغ:</label>
+                                <p id="print-expense-amount" class="font-semibold text-gray-800"></p>
+                            </div>
+                            <div>
+                                <label class="text-sm text-gray-600">التاريخ:</label>
+                                <p id="print-expense-date" class="font-semibold text-gray-800"></p>
+                            </div>
+                            <div>
+                                <label class="text-sm text-gray-600">مصدر الدفع:</label>
+                                <p id="print-expense-source" class="font-semibold text-gray-800"></p>
+                            </div>
+                            <div class="md:col-span-2">
+                                <label class="text-sm text-gray-600">الوصف:</label>
+                                <p id="print-expense-description" class="font-semibold text-gray-800"></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Employee and Box Information Section -->
+                    <div class="bg-green-50 p-4 rounded-lg mb-4">
+                        <h4 class="text-md font-semibold text-green-800 mb-3">معلومات الموظف والصندوق</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="text-sm text-gray-600">الموظف:</label>
+                                <p id="print-expense-employee" class="font-semibold text-gray-800"></p>
+                            </div>
+                            <div>
+                                <label class="text-sm text-gray-600">صندوق العهدة:</label>
+                                <p id="print-expense-box" class="font-semibold text-gray-800"></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Accounting Information Section -->
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <h4 class="text-md font-semibold text-gray-800 mb-3">معلومات المحاسبة</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="text-sm text-gray-600">تاريخ الإنشاء:</label>
+                                <p id="print-expense-created" class="font-semibold text-gray-800"></p>
+                            </div>
+                            <div>
+                                <label class="text-sm text-gray-600">آخر تحديث:</label>
+                                <p id="print-expense-updated" class="font-semibold text-gray-800"></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="items-center px-4 py-3 bg-gray-50 rounded-b-md mt-4 flex space-x-2 space-x-reverse">
+                    <button id="print-expense-btn" class="px-4 py-2 bg-green-500 text-white text-base font-medium rounded-md w-full shadow-sm hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-300">
+                        طباعة
+                    </button>
+                    <button id="close-expense-details-btn" class="px-4 py-2 bg-gray-200 text-gray-800 text-base font-medium rounded-md w-full shadow-sm hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-300">
+                        إغلاق
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Printable Expense Modal -->
+    <div id="printable-expense-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center hidden z-50">
+        <div class="relative mx-auto p-5 border w-full max-w-2xl shadow-lg rounded-md bg-white max-h-[90vh] overflow-y-auto">
+            <div class="mt-3">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-semibold">طباعة تفاصيل المصروف</h3>
+                    <div class="flex space-x-2 space-x-reverse no-print">
+                        <button id="execute-expense-print-btn" class="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 text-sm">طباعة</button>
+                        <button id="close-expense-print-modal-btn" class="bg-gray-500 text-white px-3 py-1 rounded hover:bg-gray-600 text-sm">إغلاق</button>
+                    </div>
+                </div>
+                <div id="expense-to-print" class="p-8 bg-white overflow-y-auto max-h-[70vh]">
+                    <!-- Expense details will be populated here for printing -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Purchase Details Modal -->
+    <div id="purchase-details-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center hidden z-50 no-print">
+        <div class="relative mx-auto p-5 border w-full max-w-4xl shadow-lg rounded-md bg-white max-h-[90vh] overflow-y-auto">
+            <div class="mt-3">
+                <h3 class="text-lg leading-6 font-medium text-gray-900 text-center">تفاصيل فاتورة الشراء</h3>
+                
+                <!-- Purchase Information Section -->
+                <div class="mt-4 px-4 py-3">
+                    <div class="bg-blue-50 p-4 rounded-lg mb-4">
+                        <h4 class="text-md font-semibold text-blue-800 mb-3">معلومات الفاتورة الأساسية</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="text-sm text-gray-600">رقم الفاتورة الداخلي:</label>
+                                <p id="print-purchase-internal-number" class="font-semibold text-gray-800"></p>
+                            </div>
+                            <div>
+                                <label class="text-sm text-gray-600">رقم فاتورة المورد:</label>
+                                <p id="print-purchase-invoice-number" class="font-semibold text-gray-800"></p>
+                            </div>
+                            <div>
+                                <label class="text-sm text-gray-600">التاريخ:</label>
+                                <p id="print-purchase-details-date" class="font-semibold text-gray-800"></p>
+                            </div>
+                            <div>
+                                <label class="text-sm text-gray-600">المورد:</label>
+                                <p id="print-purchase-supplier" class="font-semibold text-gray-800"></p>
+                            </div>
+                            <div>
+                                <label class="text-sm text-gray-600">طريقة الدفع:</label>
+                                <p id="print-purchase-payment-method" class="font-semibold text-gray-800"></p>
+                            </div>
+                            <div>
+                                <label class="text-sm text-gray-600">حالة الدفع:</label>
+                                <p id="print-purchase-payment-status" class="font-semibold text-gray-800"></p>
+                            </div>
+                            <div>
+                                <label class="text-sm text-gray-600">حالة الاستلام:</label>
+                                <p id="print-purchase-receive-status" class="font-semibold text-gray-800"></p>
+                            </div>
+                            <div>
+                                <label class="text-sm text-gray-600">الحالة:</label>
+                                <p id="print-purchase-status" class="font-semibold text-gray-800"></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Financial Information Section -->
+                    <div class="bg-green-50 p-4 rounded-lg mb-4">
+                        <h4 class="text-md font-semibold text-green-800 mb-3">المعلومات المالية</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="text-sm text-gray-600">إجمالي الفاتورة:</label>
+                                <p id="print-purchase-total" class="font-semibold text-gray-800"></p>
+                            </div>
+                            <div>
+                                <label class="text-sm text-gray-600">المبلغ المدفوع:</label>
+                                <p id="print-purchase-paid" class="font-semibold text-gray-800"></p>
+                            </div>
+                            <div>
+                                <label class="text-sm text-gray-600">المبلغ المتبقي:</label>
+                                <p id="print-purchase-remaining" class="font-semibold text-gray-800"></p>
+                            </div>
+                            <div>
+                                <label class="text-sm text-gray-600">الضريبة:</label>
+                                <p id="print-purchase-tax" class="font-semibold text-gray-800"></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Items Section -->
+                    <div class="bg-gray-50 p-4 rounded-lg mb-4">
+                        <h4 class="text-md font-semibold text-gray-800 mb-3">تفاصيل المنتجات</h4>
+                        <div id="print-purchase-items" class="overflow-x-auto">
+                            <!-- Items will be populated here -->
+                        </div>
+                    </div>
+
+                    <!-- Notes Section -->
+                    <div class="bg-yellow-50 p-4 rounded-lg">
+                        <h4 class="text-md font-semibold text-yellow-800 mb-3">ملاحظات</h4>
+                        <div>
+                            <label class="text-sm text-gray-600">الملاحظات:</label>
+                            <p id="print-purchase-notes" class="font-semibold text-gray-800"></p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="items-center px-4 py-3 bg-gray-50 rounded-b-md mt-4 flex space-x-2 space-x-reverse">
+                    <button id="print-purchase-details-btn" class="px-4 py-2 bg-green-500 text-white text-base font-medium rounded-md w-full shadow-sm hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-300">
+                        طباعة
+                    </button>
+                    <button id="close-purchase-details-btn" class="px-4 py-2 bg-gray-200 text-gray-800 text-base font-medium rounded-md w-full shadow-sm hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-300">
+                        إغلاق
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Printable Purchase Details Modal -->
+    <div id="printable-purchase-details-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center hidden z-50">
+        <div class="relative mx-auto p-5 border w-full max-w-4xl shadow-lg rounded-md bg-white max-h-[90vh] overflow-y-auto">
+            <div class="mt-3">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-semibold">طباعة تفاصيل فاتورة الشراء</h3>
+                    <div class="flex space-x-2 space-x-reverse no-print">
+                        <button id="execute-purchase-details-print-btn" class="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 text-sm">طباعة</button>
+                        <button id="close-purchase-details-print-modal-btn" class="bg-gray-500 text-white px-3 py-1 rounded hover:bg-gray-600 text-sm">إغلاق</button>
+                    </div>
+                </div>
+                <div id="purchase-details-to-print" class="p-8 bg-white overflow-y-auto max-h-[70vh]">
+                    <!-- Purchase details will be populated here for printing -->
+                </div>
+            </div>
+        </div>
+    </div>
+
 
 <script type="module">
     // --- Firebase SDKs and Initialization ---
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getFirestore, collection, addDoc, getDocs, query, orderBy, doc, setDoc, getDoc, runTransaction, where, increment, serverTimestamp, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { getFirestore, collection, addDoc, getDocs, query, orderBy, doc, setDoc, getDoc, runTransaction, where, increment, serverTimestamp, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
     import { 
         getAuth, 
         onAuthStateChanged,
@@ -2149,6 +2445,89 @@
         // --- GLOBAL STATE ---
         let invoiceData = {};
         let productsCache = []; // To store products for dropdowns
+        
+        // PDF Generation State
+        let pdfSerialCounter = 0;
+        let pdfSerialCounterKey = 'pdfSerialCounter';
+        
+        // Initialize PDF serial counter from localStorage
+        function initializePdfSerialCounter() {
+            const saved = localStorage.getItem(pdfSerialCounterKey);
+            pdfSerialCounter = saved ? parseInt(saved) : 0;
+        }
+        
+        // Increment and save PDF serial counter
+        function getNextPdfSerial() {
+            pdfSerialCounter++;
+            localStorage.setItem(pdfSerialCounterKey, pdfSerialCounter.toString());
+            console.log('PDF Serial Counter:', pdfSerialCounter);
+            return pdfSerialCounter;
+        }
+        
+        // Generate PDF from HTML element
+        async function generatePDF(elementId, filename) {
+            try {
+                const element = document.getElementById(elementId);
+                if (!element) {
+                    console.error('Element not found:', elementId);
+                    return;
+                }
+                
+                // Use html2canvas to capture the element
+                const canvas = await html2canvas(element, {
+                    scale: 2,
+                    useCORS: true,
+                    allowTaint: true,
+                    backgroundColor: '#ffffff'
+                });
+                
+                // Create PDF
+                if (!window.jspdf) {
+                    throw new Error('jsPDF library not loaded');
+                }
+                
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF('p', 'mm', 'a4');
+                
+                console.log('Creating PDF with filename:', filename);
+                
+                const imgWidth = 210; // A4 width in mm
+                const pageHeight = 295; // A4 height in mm
+                const imgHeight = (canvas.height * imgWidth) / canvas.width;
+                let heightLeft = imgHeight;
+                
+                let position = 0;
+                
+                // Add image to PDF
+                pdf.addImage(canvas, 'PNG', 0, position, imgWidth, imgHeight);
+                heightLeft -= pageHeight;
+                
+                // Add new pages if content is longer than one page
+                while (heightLeft >= 0) {
+                    position = heightLeft - imgHeight;
+                    pdf.addPage();
+                    pdf.addImage(canvas, 'PNG', 0, position, imgWidth, imgHeight);
+                    heightLeft -= pageHeight;
+                }
+                
+                // Validate filename
+                if (!filename || filename.trim() === '') {
+                    throw new Error('Invalid filename provided');
+                }
+                
+                // Save the PDF with the custom filename
+                pdf.save(filename);
+                
+                console.log('PDF generated successfully:', filename);
+                
+            } catch (error) {
+                console.error('Error generating PDF:', error);
+                alert('حدث خطأ أثناء إنشاء ملف PDF: ' + error.message);
+            }
+        }
+        
+        // Initialize PDF counter on page load
+        initializePdfSerialCounter();
 
         // --- UI Elements ---
         const loginPage = document.getElementById('login-page');
@@ -2286,6 +2665,13 @@
                 );
             }
             
+            // Channel filter
+            if (currentSearchFilters.channel) {
+                filtered = filtered.filter(invoice => 
+                    invoice.invoice.channel === currentSearchFilters.channel
+                );
+            }
+            
             // Sort
             filtered.sort((a, b) => {
                 const [field, direction] = currentSearchFilters.sortBy.split('-');
@@ -2307,6 +2693,11 @@
                     case 'customer':
                         aValue = (a.invoice.customer || '').toLowerCase();
                         bValue = (b.invoice.customer || '').toLowerCase();
+                        break;
+                    case 'manualInvoiceNumber':
+                        // Handle manual invoice number sorting (alphanumeric)
+                        aValue = (a.invoice.manualInvoiceNumber || '').toLowerCase();
+                        bValue = (b.invoice.manualInvoiceNumber || '').toLowerCase();
                         break;
                     default:
                         return 0;
@@ -2482,6 +2873,7 @@
             currentSearchFilters.paymentStatus = paymentStatusFilter ? paymentStatusFilter.value : '';
             currentSearchFilters.paymentMethod = paymentMethodFilter ? paymentMethodFilter.value : '';
             currentSearchFilters.sortBy = sortBy ? sortBy.value : 'createdAt-desc';
+            currentSearchFilters.channel = currentChannelFilter; // Include channel filter
             
             // Apply filters to all invoices
             filteredInvoices = applySearchFilters(allInvoices);
@@ -2500,6 +2892,12 @@
             if (paymentMethodFilter) paymentMethodFilter.value = '';
             if (sortBy) sortBy.value = 'createdAt-desc';
             
+            // Reset channel filter buttons
+            const channelFilterButtons = document.querySelectorAll('.channel-filter-btn');
+            channelFilterButtons.forEach(btn => btn.classList.remove('active'));
+            document.getElementById('filter-all-channels').classList.add('active');
+            currentChannelFilter = '';
+            
             currentSearchFilters = {
                 searchText: '',
                 dateFrom: '',
@@ -2508,7 +2906,8 @@
                 amountTo: '',
                 paymentStatus: '',
                 paymentMethod: '',
-                sortBy: 'createdAt-desc'
+                sortBy: 'createdAt-desc',
+                channel: ''
             };
             
             // Reset to show all invoices
@@ -3385,6 +3784,8 @@
         const invoiceItemsContainer = document.getElementById('invoice-items-container');
         const addItemBtn = document.getElementById('add-item-btn');
         const calculatedTotalEl = document.getElementById('invoice-calculated-total');
+        const invoiceDiscountEl = document.getElementById('invoice-discount');
+        const invoiceDiscountPercentEl = document.getElementById('invoice-discount-percent');
         const viewInvoiceModal = document.getElementById('view-invoice-modal');
         const closeViewModalBtn = document.getElementById('close-view-modal-btn');
         const viewInvoiceContent = document.getElementById('view-invoice-content');
@@ -3399,8 +3800,11 @@
         const printCustomerName = document.getElementById('print-customer-name');
         const printInvoiceItems = document.getElementById('print-invoice-items');
         const printInvoiceTotal = document.getElementById('print-invoice-total');
+        const printInvoiceSubtotal = document.getElementById('print-invoice-subtotal');
+        const printInvoiceDiscount = document.getElementById('print-invoice-discount');
         const printInvoiceId = document.getElementById('print-invoice-id');
         const printInvoiceDate = document.getElementById('print-invoice-date');
+        const printInvoiceTitle = document.getElementById('print-invoice-title');
         const orderSourceInfo = document.getElementById('order-source-info');
         const printOrderSource = document.getElementById('print-order-source');
         const companyTotals = document.getElementById('company-totals');
@@ -3492,6 +3896,7 @@
         // Stock Out Data
         let stockOutsCache = [];
         let currentViewingStockOutId = null;
+        let currentPrintingPurchase = null; // Store current purchase data for printing
         const executePurchasePrintBtn = document.getElementById('execute-purchase-print-btn');
         const printPurchaseId = document.getElementById('print-purchase-id');
         const printPurchaseDate = document.getElementById('print-purchase-date');
@@ -3522,8 +3927,24 @@
                 const p = Number((row.querySelector('.item-price') || {}).value || 0);
                 if (!isNaN(q) && !isNaN(p)) sum += q * p;
             });
-            calculatedTotalEl.textContent = `${sum.toFixed(2)} ج.م`;
-            return sum;
+            
+            // Apply discount (either fixed amount or percentage)
+            let discount = 0;
+            const fixedDiscount = Number(invoiceDiscountEl ? invoiceDiscountEl.value || 0 : 0);
+            const percentDiscount = Number(invoiceDiscountPercentEl ? invoiceDiscountPercentEl.value || 0 : 0);
+            
+            if (percentDiscount > 0) {
+                // Calculate discount as percentage of subtotal
+                discount = sum * (percentDiscount / 100);
+            } else {
+                // Use fixed discount amount
+                discount = fixedDiscount;
+            }
+            
+            const totalAfterDiscount = Math.max(0, sum - discount);
+            
+            calculatedTotalEl.textContent = `${totalAfterDiscount.toFixed(2)} ج.م`;
+            return totalAfterDiscount;
         }
 
         async function getNextInvoiceNumber() {
@@ -3571,11 +3992,73 @@
             }
         }
 
+        // CRITICAL: Check for duplicate invoice content (same customer, date, total, items)
+        async function checkInvoiceContentDuplicate(customer, date, total, items) {
+            try {
+                // Get invoices from the same date and customer
+                const invoicesQuery = query(
+                    collection(db, 'invoices'),
+                    where('customer', '==', customer),
+                    where('date', '==', date)
+                );
+                const snapshot = await getDocs(invoicesQuery);
+                
+                for (const doc of snapshot.docs) {
+                    const invoiceData = doc.data();
+                    
+                    // Check if total matches (within 0.01 tolerance for floating point)
+                    if (Math.abs(invoiceData.total - total) < 0.01) {
+                        // Check if items match (same products and quantities)
+                        const invoiceItems = invoiceData.items || [];
+                        if (invoiceItems.length === items.length) {
+                            let itemsMatch = true;
+                            for (let i = 0; i < items.length; i++) {
+                                const currentItem = items[i];
+                                const existingItem = invoiceItems[i];
+                                
+                                if (currentItem.productId !== existingItem.productId ||
+                                    currentItem.quantity !== existingItem.quantity ||
+                                    Math.abs(currentItem.price - existingItem.price) > 0.01) {
+                                    itemsMatch = false;
+                                    break;
+                                }
+                            }
+                            
+                            if (itemsMatch) {
+                                console.log('Duplicate invoice content detected:', {
+                                    customer,
+                                    date,
+                                    total,
+                                    invoiceId: doc.id
+                                });
+                                return true; // Duplicate found
+                            }
+                        }
+                    }
+                }
+                return false; // No duplicate
+            } catch (error) {
+                console.error('Error checking invoice content duplicate:', error);
+                return false; // Allow save on error to prevent blocking
+            }
+        }
+
         // Function to validate manual invoice number in real-time
         let validationTimeout = null;
         async function validateManualInvoiceNumber() {
             const manualInput = document.getElementById('manual-invoice-number');
             if (!manualInput) return;
+            
+            // CRITICAL: Only validate for new invoices, not when editing existing ones
+            if (currentEditingInvoiceId) {
+                // Clear any existing validation styling for editing mode
+                manualInput.classList.remove('border-red-500', 'border-green-500');
+                const existingMessage = manualInput.parentNode.querySelector('.validation-message');
+                if (existingMessage) {
+                    existingMessage.remove();
+                }
+                return;
+            }
             
             const manualNumber = manualInput.value.trim();
             
@@ -3704,6 +4187,28 @@
         if (invoiceItemsContainer) { /* ... event listeners ... */ }
         if (addItemBtn) addItemBtn.addEventListener('click', addItemRow);
         
+        // Add event listener for discount field
+        if (invoiceDiscountEl) invoiceDiscountEl.addEventListener('input', calculateTotal);
+        if (invoiceDiscountPercentEl) {
+            invoiceDiscountPercentEl.addEventListener('input', () => {
+                calculateTotal();
+                // Clear fixed discount when percentage is entered
+                if (invoiceDiscountPercentEl.value > 0 && invoiceDiscountEl) {
+                    invoiceDiscountEl.value = '';
+                }
+            });
+        }
+        // Add event listener to clear percentage when fixed amount is entered
+        if (invoiceDiscountEl) {
+            invoiceDiscountEl.addEventListener('input', () => {
+                calculateTotal();
+                // Clear percentage discount when fixed amount is entered
+                if (invoiceDiscountEl.value > 0 && invoiceDiscountPercentEl) {
+                    invoiceDiscountPercentEl.value = '';
+                }
+            });
+        }
+        
         // Helper function to create new product from text input
         async function createNewProductFromText(productName, price) {
             if (!db) return null;
@@ -3788,6 +4293,9 @@
             if(invoiceDescEl) invoiceDescEl.value = inv.description || '';
             if(manualInvoiceNumberEl) manualInvoiceNumberEl.value = inv.manualInvoiceNumber || '';
             if(internalInvoiceNumberEl) internalInvoiceNumberEl.value = inv.invoiceNumber || '';
+            if(invoiceDiscountEl) invoiceDiscountEl.value = inv.discount || 0;
+            const invoiceDiscountPercentInput = document.getElementById('invoice-discount-percent');
+            if(invoiceDiscountPercentInput) invoiceDiscountPercentInput.value = inv.discountPercent || 0;
             if(invoiceItemsContainer) {
                 invoiceItemsContainer.innerHTML = '';
                 const items = Array.isArray(inv.items) ? inv.items : [];
@@ -3806,7 +4314,13 @@
                     if(totalEl) totalEl.textContent = `${(Number(qtyEl.value) * Number(priceEl.value)).toFixed(2)} ج.م`;
                 });
             }
-            if(typeof calculateTotal === 'function') calculateTotal();
+            if(typeof calculateTotal === 'function') {
+                calculateTotal();
+            }
+            // Recalculate discount if percentage is set
+            if(invoiceDiscountPercentInput && inv.discountPercent > 0) {
+                setTimeout(calculateTotal, 100); // Delay to ensure form is fully loaded
+            }
             if(invoiceModal) invoiceModal.classList.remove('hidden');
         }
         async function showViewModal(invoiceId) {
@@ -3885,7 +4399,12 @@
                         </tbody>
                     </table>
                     <div class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2 font-bold text-lg">
-                        <div class="flex justify-between"><span>الإجمالي:</span><span>${overallTotal} ج.م</span></div>
+                        <div class="flex justify-between"><span>المجموع الفرعي:</span><span>${(Number(invoice.subtotal || 0) || (Array.isArray(invoice.items) ? invoice.items : []).reduce((acc, it) => acc + (Number(it.quantity)||0) * (Number(it.price)||0), 0)).toFixed(2)} ج.م</span></div>
+                        <div class="flex justify-between">
+                            <span>الخصم:${invoice.discountPercent > 0 ? ` (${invoice.discountPercent}%)` : ''}</span>
+                            <span>${Number(invoice.discount || 0).toFixed(2)} ج.م</span>
+                        </div>
+                        <div class="flex justify-between"><span>الإجمالي النهائي:</span><span>${overallTotal} ج.م</span></div>
                         <div class="flex justify-between"><span>المدفوع:</span><span>${Number(invoice.paidAmount || 0).toFixed(2)} ج.م</span></div>
                         <div class="flex justify-between"><span>المتبقي:</span><span>${Number(invoice.amountDue != null ? invoice.amountDue : (overallTotal - Number(invoice.paidAmount || 0))).toFixed(2)} ج.م</span></div>
                     </div>
@@ -3933,7 +4452,20 @@
             if (!invoice || !printableInvoiceModal) return;
             
             // Set invoice header
-            if (printInvoiceId) printInvoiceId.textContent = `Invoice #${invoiceId}`;
+            if (printInvoiceTitle) {
+                if (currentPrintType === 'customer') {
+                    printInvoiceTitle.style.display = 'none'; // Hide title for customer prints
+                } else {
+                    printInvoiceTitle.style.display = 'block'; // Show title for company prints
+                }
+            }
+            if (printInvoiceId) {
+                if (currentPrintType === 'customer') {
+                    printInvoiceId.textContent = ''; // Hide invoice ID for customer prints
+                } else {
+                    printInvoiceId.textContent = `Invoice #${invoiceId}`;
+                }
+            }
             if (printInvoiceDate) {
                 const invoiceDate = new Date(invoice.date.seconds ? invoice.date.seconds * 1000 : invoice.date);
                 printInvoiceDate.textContent = invoiceDate.toLocaleDateString('en-US');
@@ -3981,8 +4513,8 @@
                             <tr class="border-b">
                                 <td class="p-2">${it.productName || '-'}</td>
                                 <td class="p-2 text-center">${qty}</td>
-                                <td class="p-2 text-center">$${price}</td>
-                                <td class="p-2 text-right">$${total}</td>
+                                <td class="p-2 text-center">${price}</td>
+                                <td class="p-2 text-right">${total}</td>
                             </tr>
                         `;
                     }
@@ -3999,13 +4531,32 @@
                 }
             });
             
-            // Set invoice total
+            // Set invoice totals
+            const subtotal = (Number(invoice.subtotal || 0) || (Array.isArray(invoice.items) ? invoice.items : []).reduce((acc, it) => acc + (Number(it.quantity)||0) * (Number(it.price)||0), 0)).toFixed(2);
+            const discount = Number(invoice.discount || 0).toFixed(2);
+            const total = Number(invoice.total || 0).toFixed(2);
+            
+            if (printInvoiceSubtotal) {
+                if (currentPrintType === 'company') {
+                    printInvoiceSubtotal.textContent = subtotal;
+                } else {
+                    printInvoiceSubtotal.textContent = subtotal;
+                }
+            }
+            
+            if (printInvoiceDiscount) {
+                if (currentPrintType === 'company') {
+                    printInvoiceDiscount.textContent = discount;
+                } else {
+                    printInvoiceDiscount.textContent = discount;
+                }
+            }
+            
             if (printInvoiceTotal) {
-                const total = (Array.isArray(invoice.items) ? invoice.items : []).reduce((acc, it) => acc + (Number(it.quantity)||0) * (Number(it.price)||0), 0).toFixed(2);
                 if (currentPrintType === 'company') {
                     printInvoiceTotal.textContent = total;
                 } else {
-                    printInvoiceTotal.textContent = `$${total}`;
+                    printInvoiceTotal.textContent = total;
                 }
             }
             
@@ -4061,8 +4612,9 @@
             // Calculate totals
             const items = Array.isArray(purchase.items) ? purchase.items : [];
             const subtotal = items.reduce((sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.unitCost) || 0), 0);
+            const vatEnabled = !!purchase.vatEnabled;
             const vatRate = Number(purchase.vatRate) || 0;
-            const vatAmount = subtotal * (vatRate / 100);
+            const vatAmount = vatEnabled ? (subtotal * (vatRate / 100)) : 0;
             const total = subtotal + vatAmount;
             const paidAmount = Number(purchase.paidAmount) || 0;
             const remaining = total - paidAmount;
@@ -4141,7 +4693,7 @@
                             <span>${subtotal.toFixed(2)} ج.م</span>
                         </div>
                         <div class="flex justify-between">
-                            <span>الضريبة (${vatRate}%):</span>
+                            <span>الضريبة (${vatEnabled ? vatRate : 0}%):</span>
                             <span>${vatAmount.toFixed(2)} ج.م</span>
                         </div>
                         <div class="flex justify-between border-t-2 pt-2">
@@ -4307,15 +4859,22 @@
             // Calculate totals
             const items = Array.isArray(purchase.items) ? purchase.items : [];
             const subtotal = items.reduce((sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.unitCost) || 0), 0);
+            const vatEnabled = !!purchase.vatEnabled;
             const vatRate = Number(purchase.vatRate) || 0;
-            const vatAmount = subtotal * (vatRate / 100);
+            const vatAmount = vatEnabled ? (subtotal * (vatRate / 100)) : 0;
             const total = subtotal + vatAmount;
             const paidAmount = Number(purchase.paidAmount) || 0;
             const remaining = total - paidAmount;
             
             // Populate print content
             if (printPurchaseId) printPurchaseId.textContent = `#${purchase.internalNumber || String(purchaseId).substring(0, 8).toUpperCase()}`;
-            if (printPurchaseDate) printPurchaseDate.textContent = purchase.date || '';
+            if (printPurchaseDate) {
+                const dateValue = purchase.date || '';
+                printPurchaseDate.textContent = dateValue ? `التاريخ: ${dateValue}` : 'التاريخ: غير محدد';
+                console.log('Purchase date set:', dateValue); // Debug log
+            } else {
+                console.error('printPurchaseDate element not found!'); // Debug log
+            }
             if (printPurchaseSupplierInvoice) printPurchaseSupplierInvoice.textContent = purchase.supplierInvoiceNumber ? `فاتورة المورد: ${purchase.supplierInvoiceNumber}` : '';
             if (printSupplierName) printSupplierName.textContent = purchase.supplierName || '';
             if (printPaymentStatus) printPaymentStatus.textContent = purchase.paymentStatus || '';
@@ -5024,6 +5583,12 @@
             saveInvoiceBtn.addEventListener('click', async () => {
                 if (!db) { alert('لا يمكن حفظ الفاتورة.'); return; }
                 
+                // CRITICAL: Prevent double-click and multiple submissions
+                if (saveInvoiceBtn.disabled) {
+                    console.log('Invoice save already in progress, ignoring duplicate click');
+                    return;
+                }
+                
                 // Basic validations
                 const hasInvalid = Array.from(invoiceItemsContainer.querySelectorAll('.invoice-item')).some(row => {
                     const productId = (row.querySelector('.item-desc') || {}).value || '';
@@ -5082,9 +5647,24 @@
                     const paidAmount = Number(document.getElementById('paid-amount').value || 0);
                     const paidAt = document.getElementById('paid-at').value || null;
                     const manualInvoiceNumber = document.getElementById('manual-invoice-number').value.trim();
+                    const discount = Number(document.getElementById('invoice-discount').value || 0);
+                    const discountPercent = Number(document.getElementById('invoice-discount-percent').value || 0);
 
-                    // Check for duplicate manual invoice number
-                    if (manualInvoiceNumber) {
+                    // compute totals FIRST (before any validation checks)
+                    const subtotal = itemsToSave.reduce((acc, it) => acc + (Number(it.quantity) * Number(it.price)), 0);
+                    
+                    // Apply discount (percentage takes precedence)
+                    let finalDiscount = 0;
+                    if (discountPercent > 0) {
+                        finalDiscount = subtotal * (discountPercent / 100);
+                    } else {
+                        finalDiscount = discount;
+                    }
+                    
+                    const invoiceTotal = Math.max(0, subtotal - finalDiscount);
+                    
+                    // CRITICAL: Check for duplicate manual invoice number (ONLY for new invoices)
+                    if (manualInvoiceNumber && !currentEditingInvoiceId) {
                         const isDuplicate = await checkManualInvoiceNumberExists(manualInvoiceNumber, currentEditingInvoiceId);
                         if (isDuplicate) {
                             alert(`رقم الفاتورة اليدوي "${manualInvoiceNumber}" موجود بالفعل. يرجى استخدام رقم مختلف.`);
@@ -5093,9 +5673,17 @@
                             return;
                         }
                     }
-
-                    // compute totals
-                    const invoiceTotal = itemsToSave.reduce((acc, it) => acc + (Number(it.quantity) * Number(it.price)), 0);
+                    
+                    // CRITICAL: Check for duplicate invoice content (same customer, date, total, items)
+                    if (!currentEditingInvoiceId) {
+                        const isContentDuplicate = await checkInvoiceContentDuplicate(customer, date, invoiceTotal, itemsToSave);
+                        if (isContentDuplicate) {
+                            alert(`تحذير: فاتورة مماثلة موجودة بالفعل لنفس العميل والتاريخ والمبلغ. يرجى التحقق من البيانات أو إضافة تفاصيل مختلفة.`);
+                            saveInvoiceBtn.textContent = 'حفظ الفاتورة';
+                            saveInvoiceBtn.disabled = false;
+                            return;
+                        }
+                    }
                     const amountDue = Math.max(0, invoiceTotal - paidAmount);
 
                     if (currentEditingInvoiceId) {
@@ -5107,7 +5695,7 @@
                             const lineCOGS = unitCost * Number(it.quantity || 0);
                             return { ...it, unitCost, lineCOGS };
                         });
-                        const updatedInvoiceData = { customer, date, channel, paymentMethod, description, manualInvoiceNumber, total: invoiceTotal, amountDue, items: mergedItems, updatedAt: new Date(), updatedBy: (auth && auth.currentUser) ? auth.currentUser.uid : null };
+                        const updatedInvoiceData = { customer, date, channel, paymentMethod, description, manualInvoiceNumber, discount: finalDiscount, discountPercent, subtotal, total: invoiceTotal, amountDue, items: mergedItems, updatedAt: new Date(), updatedBy: (auth && auth.currentUser) ? auth.currentUser.uid : null };
                         await setDoc(doc(db, 'invoices', currentEditingInvoiceId), updatedInvoiceData, { merge: true });
                         
                         // Record payment entry if provided
@@ -5129,7 +5717,7 @@
                         const invoiceRef = doc(collection(db, 'invoices'));
                         const invoiceNumber = await getNextInvoiceNumber();
                         await runTransaction(db, async (transaction) => {
-                            const newInvoiceData = { customer, date, channel, paymentMethod, description, manualInvoiceNumber, invoiceNumber, total: invoiceTotal, amountDue, items: itemsToSave, createdAt: new Date(), createdBy: (auth && auth.currentUser) ? auth.currentUser.uid : null };
+                            const newInvoiceData = { customer, date, channel, paymentMethod, description, manualInvoiceNumber, invoiceNumber, discount: finalDiscount, discountPercent, subtotal, total: invoiceTotal, amountDue, items: itemsToSave, createdAt: new Date(), createdBy: (auth && auth.currentUser) ? auth.currentUser.uid : null };
                             // 1) READ all required product docs first
                             const productUpdates = [];
                             for (const item of itemsToSave) {
@@ -5219,14 +5807,27 @@
             if (voidEl) { voidInvoice(voidEl.dataset.invoiceId); return; }
         }); }
         
-        // Channel filter event listener
-        const channelFilter = document.getElementById('channel-filter');
-        if (channelFilter) {
-            channelFilter.addEventListener('change', async () => {
-                const selectedChannel = channelFilter.value;
-                await fetchAndDisplayInvoices(selectedChannel);
+        // Channel filter buttons event listeners
+        const channelFilterButtons = document.querySelectorAll('.channel-filter-btn');
+        let currentChannelFilter = ''; // Track current filter
+        
+        channelFilterButtons.forEach(button => {
+            button.addEventListener('click', async () => {
+                // Remove active class from all buttons
+                channelFilterButtons.forEach(btn => btn.classList.remove('active'));
+                
+                // Add active class to clicked button
+                button.classList.add('active');
+                
+                // Get the channel value
+                const channel = button.dataset.channel || '';
+                currentChannelFilter = channel;
+                
+                // Apply the filter and trigger search to work with other filters
+                await fetchAndDisplayInvoices(channel);
+                performSearch(); // This ensures other filters are also applied
             });
-        }
+        });
         
         // Search and Filter Event Listeners
         if (searchInvoicesBtn) {
@@ -5836,7 +6437,7 @@
 
         async function fetchAndDisplayPurchases() {
             if (!db || !purchasesTableBody) return;
-            purchasesTableBody.innerHTML = '<tr><td colspan="10" class="p-4 text-center text-gray-500">جاري تحميل المشتريات...</td></tr>';
+            purchasesTableBody.innerHTML = '<tr><td colspan="11" class="p-4 text-center text-gray-500">جاري تحميل المشتريات...</td></tr>';
             try {
                 const qPurch = query(collection(db, 'purchases'), orderBy('createdAt', 'desc'));
                 const snap = await getDocs(qPurch);
@@ -5850,9 +6451,10 @@
                 let totalInvoices = 0;
                 
                 if (snap.empty) {
-                    purchasesTableBody.innerHTML = '<tr><td colspan="10" class="p-4 text-center text-gray-500">لا توجد عمليات شراء.</td></tr>';
+                    purchasesTableBody.innerHTML = '<tr><td colspan="11" class="p-4 text-center text-gray-500">لا توجد عمليات شراء.</td></tr>';
                     return;
                 }
+                let serialNumber = 1;
                 snap.forEach(d => {
                     const p = d.data();
                     if (p && p.deleted === true) return;
@@ -5880,6 +6482,7 @@
                     const row = document.createElement('tr');
                     row.className = 'border-b hover:bg-gray-50' + (p.voided ? ' bg-gray-50' : '');
                     row.innerHTML = `
+                        <td class="p-3 ${p.voided ? 'text-gray-400 line-through' : ''}">${serialNumber}</td>
                         <td class="p-3 ${p.voided ? 'text-gray-400 line-through' : ''}">${p.internalNumber || String(d.id).substring(0,8).toUpperCase()}</td>
                         <td class="p-3 ${p.voided ? 'text-gray-400 line-through' : ''}">${p.supplierInvoiceNumber || '-'}</td>
                         <td class="p-3 ${p.voided ? 'text-gray-400 line-through' : ''}">${p.supplierName || '-'}</td>
@@ -5891,6 +6494,7 @@
                         <td class="p-3">${receiveStatusBadge}</td>
                         <td class="p-3 space-x-2 space-x-reverse">
                             <span class="text-green-600 cursor-pointer view-purchase-btn" data-purchase-id="${d.id}">عرض</span>
+                            <span class="text-purple-600 cursor-pointer print-purchase-btn" data-purchase-id="${d.id}">طباعة</span>
                             ${p.voided ? '' : `<span class="text-blue-600 cursor-pointer edit-purchase-btn" data-purchase-id="${d.id}">تعديل</span>`}
                             ${p.voided ? '' : `<span class="text-indigo-600 cursor-pointer edit-allocation-btn" data-purchase-id="${d.id}">تعديل التوزيع</span>`}
                             ${p.voided ? '' : `<span class=\"text-red-600 cursor-pointer void-purchase-btn\" data-purchase-id=\"${d.id}\">إلغاء</span>`}
@@ -5898,6 +6502,7 @@
                         </td>
                     `;
                     purchasesTableBody.appendChild(row);
+                    serialNumber++; // Increment only for valid purchases
                 });
                 
                 // Add total summary rows
@@ -5906,7 +6511,7 @@
                     const totalRow = document.createElement('tr');
                     totalRow.className = 'bg-gray-100 font-bold';
                     totalRow.innerHTML = `
-                        <td colspan="4" class="p-3 text-right">المجموع الكلي:</td>
+                        <td colspan="5" class="p-3 text-right">المجموع الكلي:</td>
                         <td class="p-3 font-bold text-lg">${totalPurchasesAmount.toFixed(2)} ج.م</td>
                         <td class="p-3 font-bold text-lg">${totalPaidAmount.toFixed(2)} ج.م</td>
                         <td class="p-3 font-bold text-lg">${totalAmountDue.toFixed(2)} ج.م</td>
@@ -5918,7 +6523,7 @@
                     const summaryRow = document.createElement('tr');
                     summaryRow.className = 'bg-blue-50 text-sm';
                     summaryRow.innerHTML = `
-                        <td colspan="10" class="p-2 text-center text-blue-800">
+                        <td colspan="11" class="p-2 text-center text-blue-800">
                             إجمالي الفواتير: ${totalInvoices} فاتورة | إجمالي المبلغ: ${totalPurchasesAmount.toFixed(2)} ج.م | المدفوع: ${totalPaidAmount.toFixed(2)} ج.م | المتبقي: ${totalAmountDue.toFixed(2)} ج.م
                         </td>
                     `;
@@ -5926,7 +6531,7 @@
                 }
             } catch (e) {
                 console.error('Error loading purchases', e);
-                purchasesTableBody.innerHTML = '<tr><td colspan="10" class="p-4 text-center text-red-500">حدث خطأ أثناء تحميل المشتريات.</td></tr>';
+                purchasesTableBody.innerHTML = '<tr><td colspan="11" class="p-4 text-center text-red-500">حدث خطأ أثناء تحميل المشتريات.</td></tr>';
             }
         }
 
@@ -6119,6 +6724,11 @@
                 const viewBtn = e.target && e.target.closest && e.target.closest('.view-purchase-btn');
                 if (viewBtn) {
                     showPurchaseModal(viewBtn.getAttribute('data-purchase-id'));
+                    return;
+                }
+                const printBtn = e.target && e.target.closest && e.target.closest('.print-purchase-btn');
+                if (printBtn) {
+                    printPurchase(printBtn.getAttribute('data-purchase-id'));
                     return;
                 }
                 const delBtn = e.target && e.target.closest && e.target.closest('.delete-purchase-btn');
@@ -7612,6 +8222,66 @@
             'communication': 'اتصالات',
             'other': 'أخرى'
         };
+
+        // Load custom categories from database
+        async function loadCustomCategories() {
+            try {
+                const customCategoriesQuery = query(collection(db, 'customExpenseCategories'), orderBy('createdAt', 'desc'));
+                const customCategoriesSnapshot = await getDocs(customCategoriesQuery);
+                
+                const expenseCategorySelect = document.getElementById('expense-category');
+                if (expenseCategorySelect) {
+                    // Get existing custom category IDs to avoid duplicates
+                    const existingCustomOptions = Array.from(expenseCategorySelect.querySelectorAll('option[value^="custom-"]'));
+                    const existingCustomIds = existingCustomOptions.map(option => option.value);
+                    
+                    // Add new custom categories to dropdown and update categoryLabels
+                    customCategoriesSnapshot.forEach(doc => {
+                        const customId = `custom-${doc.id}`;
+                        
+                        // Only add if not already present
+                        if (!existingCustomIds.includes(customId)) {
+                            const categoryData = doc.data();
+                            const option = document.createElement('option');
+                            option.value = customId;
+                            option.textContent = categoryData.name;
+                            
+                            // Insert before the "add new category" option
+                            const addNewOption = expenseCategorySelect.querySelector('option[value="add-new-category"]');
+                            if (addNewOption) {
+                                expenseCategorySelect.insertBefore(option, addNewOption);
+                            } else {
+                                expenseCategorySelect.appendChild(option);
+                            }
+                        }
+                        
+                        // Always update categoryLabels for display purposes
+                        const categoryData = doc.data();
+                        categoryLabels[`custom-${doc.id}`] = categoryData.name;
+                    });
+                }
+            } catch (error) {
+                console.error('Error loading custom categories:', error);
+            }
+        }
+
+        // Save custom category to database
+        async function saveCustomCategory(categoryName) {
+            try {
+                const categoryData = {
+                    name: categoryName,
+                    createdAt: serverTimestamp(),
+                    createdBy: 'system' // You can modify this to track who created it
+                };
+                
+                const docRef = await addDoc(collection(db, 'customExpenseCategories'), categoryData);
+                console.log('Custom category saved with ID:', docRef.id);
+                return docRef.id;
+            } catch (error) {
+                console.error('Error saving custom category:', error);
+                throw error;
+            }
+        }
         
         // Initialize date inputs to today
         function initializeDateInputs() {
@@ -7838,6 +8508,7 @@
                             <div class="flex space-x-2 space-x-reverse">
                                 <button class="text-blue-600 hover:text-blue-800 view-box-btn" data-box-id="${boxId}">عرض</button>
                                 <button class="text-green-600 hover:text-green-800 edit-box-btn" data-box-id="${boxId}">تعديل</button>
+                                ${box.status === 'active' && box.currentBalance > 0 ? `<button class="text-purple-600 hover:text-purple-800 settle-box-btn" data-box-id="${boxId}" title="تسوية العهدة">تسوية</button>` : ''}
                                 <button class="text-red-600 hover:text-red-800 delete-box-btn" data-box-id="${boxId}">حذف</button>
                             </div>
                         </td>
@@ -7846,11 +8517,49 @@
                     pettyCashBoxesTableBody.appendChild(row);
                 });
                 
+                // Remove existing event listeners to prevent duplicates
+                document.querySelectorAll('.view-box-btn').forEach(btn => {
+                    btn.replaceWith(btn.cloneNode(true));
+                });
+                document.querySelectorAll('.settle-box-btn').forEach(btn => {
+                    btn.replaceWith(btn.cloneNode(true));
+                });
+                document.querySelectorAll('.edit-box-btn').forEach(btn => {
+                    btn.replaceWith(btn.cloneNode(true));
+                });
+                document.querySelectorAll('.delete-box-btn').forEach(btn => {
+                    btn.replaceWith(btn.cloneNode(true));
+                });
+                
                 // Attach event listeners to view buttons
                 document.querySelectorAll('.view-box-btn').forEach(btn => {
                     btn.addEventListener('click', () => {
                         const boxId = btn.getAttribute('data-box-id');
                         viewPettyCashBox(boxId);
+                    });
+                });
+                
+                // Attach event listeners to settle buttons
+                document.querySelectorAll('.settle-box-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const boxId = btn.getAttribute('data-box-id');
+                        settlePettyCashBox(boxId);
+                    });
+                });
+                
+                // Attach event listeners to edit buttons
+                document.querySelectorAll('.edit-box-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const boxId = btn.getAttribute('data-box-id');
+                        editPettyCashBox(boxId);
+                    });
+                });
+                
+                // Attach event listeners to delete buttons
+                document.querySelectorAll('.delete-box-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const boxId = btn.getAttribute('data-box-id');
+                        deletePettyCashBox(boxId);
                     });
                 });
             } catch (error) {
@@ -8057,6 +8766,7 @@
                         <td class="p-2">
                             ${transaction.type === 'expense' ? `
                                 <div class="flex space-x-2 space-x-reverse">
+                                    <button class="text-green-600 hover:text-green-800 print-expense-btn" data-expense-id="${transaction.id}">طباعة</button>
                                     <button class="text-blue-600 hover:text-blue-800 edit-expense-btn" data-expense-id="${transaction.id}">تعديل</button>
                                     <button class="text-red-600 hover:text-red-800 delete-expense-btn" data-expense-id="${transaction.id}">حذف</button>
                                 </div>
@@ -8226,6 +8936,114 @@
             }
         }
         
+        // Settle petty cash box (clear remaining balance to zero)
+        async function settlePettyCashBox(boxId) {
+            if (!firebaseInitialized || !db) return;
+            
+            // Prevent multiple simultaneous settlements
+            if (window.settlingBoxes && window.settlingBoxes.has(boxId)) {
+                console.log('Settlement already in progress for box:', boxId);
+                return;
+            }
+            
+            if (!window.settlingBoxes) {
+                window.settlingBoxes = new Set();
+            }
+            window.settlingBoxes.add(boxId);
+            
+            try {
+                // Get the box data first
+                const boxDoc = await getDoc(doc(db, 'pettyCashBoxes', boxId));
+                if (!boxDoc.exists()) {
+                    alert('صندوق العهدة غير موجود');
+                    return;
+                }
+                
+                const box = boxDoc.data();
+                
+                // Check if box is active
+                if (box.status !== 'active') {
+                    alert('لا يمكن تسوية صندوق مغلق');
+                    return;
+                }
+                
+                // Check if there's a balance to settle
+                if (box.currentBalance <= 0) {
+                    alert('لا يوجد رصيد للتسوية');
+                    return;
+                }
+                
+                const confirm = window.confirm(
+                    `هل أنت متأكد من تسوية صندوق العهدة "${box.name}"؟\n` +
+                    `سيتم تصفير الرصيد المتبقي: ${box.currentBalance.toFixed(2)} ج.م\n` +
+                    `سيتم إنشاء سجل مصروف للتوثيق.`
+                );
+                if (!confirm) return;
+                
+                const remainingBalance = box.currentBalance;
+                
+                console.log(`=== SETTLEMENT START ===`);
+                console.log(`Box ID: ${boxId}`);
+                console.log(`Box Name: ${box.name}`);
+                console.log(`Remaining Balance: ${remainingBalance}`);
+                
+                // Create an expense record for the settlement
+                const settlementExpense = {
+                    boxId: boxId,
+                    boxName: box.name,
+                    category: 'تسوية عهدة',
+                    source: 'petty_cash',
+                    description: `تسوية نهائية لصندوق العهدة: ${box.name}`,
+                    amount: remainingBalance,
+                    date: serverTimestamp(),
+                    createdAt: serverTimestamp(),
+                    updatedAt: serverTimestamp(),
+                    isSettlement: true
+                };
+                
+                console.log(`Creating settlement expense:`, settlementExpense);
+                
+                // Add the settlement expense record
+                const expenseDocRef = await addDoc(collection(db, 'expenses'), settlementExpense);
+                console.log(`Settlement expense created with ID: ${expenseDocRef.id}`);
+                
+                // Update the box to set balance to zero, close it, and mark as settled
+                await updateDoc(doc(db, 'pettyCashBoxes', boxId), {
+                    currentBalance: 0,
+                    status: 'closed',
+                    settledAt: serverTimestamp(),
+                    endDate: serverTimestamp(),
+                    updatedAt: serverTimestamp()
+                });
+                
+                console.log(`=== SETTLEMENT COMPLETED ===`);
+                console.log(`Box ${boxId} settled successfully with amount: ${remainingBalance}`);
+                
+                alert(`تمت تسوية صندوق العهدة بنجاح!\nتم تصفير الرصيد: ${remainingBalance.toFixed(2)} ج.م`);
+                
+                // Refresh the petty cash boxes table
+                fetchAndDisplayPettyCashBoxes();
+                
+                // Update the dashboard petty cash balance to exclude the settled box
+                if (typeof updateDashboardPettyCashBalance === 'function') {
+                    updateDashboardPettyCashBalance();
+                }
+                
+                // If viewing this box, refresh the view
+                if (currentViewingBox && currentViewingBox.id === boxId) {
+                    viewPettyCashBox(boxId);
+                }
+            } catch (error) {
+                console.error('Error settling petty cash box:', error);
+                alert('حدث خطأ أثناء تسوية العهدة: ' + error.message);
+            } finally {
+                // Remove from settling set
+                if (window.settlingBoxes) {
+                    window.settlingBoxes.delete(boxId);
+                }
+            }
+        }
+        
         // Open expense modal
         async function openExpenseModal(preselectedBoxId = null) {
             if (!firebaseInitialized || !db) return;
@@ -8258,6 +9076,9 @@
             
             // Load petty cash boxes for selection
             await loadPettyCashBoxesForExpenseForm();
+            
+            // Load custom categories
+            await loadCustomCategories();
             
             // Hide box and employee selection initially
             if (boxSelectionDiv) {
@@ -8309,6 +9130,16 @@
             if (source === 'petty-cash') {
                 if (boxSelectionDiv) {
                     boxSelectionDiv.classList.remove('hidden');
+                }
+                if (employeeSelectionDiv) {
+                    employeeSelectionDiv.classList.remove('hidden');
+                }
+                // Check employee weekly limit
+                checkEmployeeWeeklyLimit();
+            } else if (source === 'company-paid' && category === 'advance') {
+                // For company-paid advance expenses, show employee selection but hide box selection
+                if (boxSelectionDiv) {
+                    boxSelectionDiv.classList.add('hidden');
                 }
                 if (employeeSelectionDiv) {
                     employeeSelectionDiv.classList.remove('hidden');
@@ -8386,6 +9217,9 @@
         async function editExpense(expenseId) {
             if (!firebaseInitialized || !db) return;
             
+            // Load custom categories first
+            await loadCustomCategories();
+            
             try {
                 const expenseDoc = await getDoc(doc(db, 'expenses', expenseId));
                 if (!expenseDoc.exists()) {
@@ -8396,11 +9230,38 @@
                 const expense = expenseDoc.data();
                 
                 // Populate the expense form with existing data
-                // Handle custom categories - if not in predefined labels, show as "add new category"
+                // Handle custom categories - check if it's a custom category ID or predefined category
                 if (categoryLabels[expense.category]) {
                     expenseCategorySelect.value = expense.category;
+                } else if (expense.category.startsWith('custom-')) {
+                    // It's a custom category ID - try to find it in the dropdown
+                    const customCategoryId = expense.category.replace('custom-', '');
+                    const customCategoryOption = expenseCategorySelect.querySelector(`option[value="custom-${customCategoryId}"]`);
+                    if (customCategoryOption) {
+                        expenseCategorySelect.value = `custom-${customCategoryId}`;
+                    } else {
+                        // Custom category not found in dropdown, show as "add new category"
+                        expenseCategorySelect.value = 'add-new-category';
+                        const customCategoryDiv = document.getElementById('custom-category-div');
+                        const customCategoryName = document.getElementById('custom-category-name');
+                        if (customCategoryDiv && customCategoryName) {
+                            customCategoryDiv.classList.remove('hidden');
+                            // Try to get the category name from the database
+                            try {
+                                const customCategoryDoc = await getDoc(doc(db, 'customExpenseCategories', customCategoryId));
+                                if (customCategoryDoc.exists()) {
+                                    customCategoryName.value = customCategoryDoc.data().name;
+                                } else {
+                                    customCategoryName.value = expense.category.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                                }
+                            } catch (error) {
+                                customCategoryName.value = expense.category.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                            }
+                            customCategoryName.required = true;
+                        }
+                    }
                 } else {
-                    // It's a custom category
+                    // It's an old-style custom category (not using the new system)
                     expenseCategorySelect.value = 'add-new-category';
                     const customCategoryDiv = document.getElementById('custom-category-div');
                     const customCategoryName = document.getElementById('custom-category-name');
@@ -8505,6 +9366,447 @@
                 console.error('Error deleting expense:', error);
                 alert('حدث خطأ أثناء حذف المصروف: ' + error.message);
             }
+        }
+        
+        // Print expense details
+        async function printExpense(expenseId) {
+            if (!firebaseInitialized || !db) return;
+            
+            console.log('Printing expense', expenseId);
+            
+            try {
+                let expense;
+                let isPurchaseLinked = false;
+                
+                // First try to get from regular expenses collection
+                const expenseDoc = await getDoc(doc(db, 'expenses', expenseId));
+                if (expenseDoc.exists()) {
+                    expense = expenseDoc.data();
+                } else {
+                    // If not found in expenses, try balanceChanges (purchase-linked expenses)
+                    const balanceChangeDoc = await getDoc(doc(db, 'balanceChanges', expenseId));
+                    if (balanceChangeDoc.exists()) {
+                        const changeData = balanceChangeDoc.data();
+                        expense = {
+                            category: 'مشتريات',
+                            description: changeData.description,
+                            amount: changeData.amount,
+                            source: 'petty-cash',
+                            date: changeData.date,
+                            boxId: changeData.boxId,
+                            employeeId: null,
+                            purchaseId: changeData.purchaseId,
+                            createdAt: changeData.createdAt,
+                            updatedAt: changeData.updatedAt
+                        };
+                        isPurchaseLinked = true;
+                    } else {
+                        alert('المصروف غير موجود');
+                        return;
+                    }
+                }
+                
+                // Get employee name
+                let employeeName = 'غير محدد';
+                if (expense.employeeId) {
+                    try {
+                        const employeeDoc = await getDoc(doc(db, 'employees', expense.employeeId));
+                        if (employeeDoc.exists()) {
+                            employeeName = employeeDoc.data().name;
+                        }
+                    } catch (error) {
+                        console.error('Error fetching employee:', error);
+                    }
+                }
+                
+                // Get box name
+                let boxName = 'غير محدد';
+                if (expense.boxId) {
+                    try {
+                        const boxDoc = await getDoc(doc(db, 'pettyCashBoxes', expense.boxId));
+                        if (boxDoc.exists()) {
+                            boxName = boxDoc.data().name;
+                        }
+                    } catch (error) {
+                        console.error('Error fetching box:', error);
+                    }
+                }
+                
+                // Get category label
+                const categoryLabels = {
+                    'advance': 'سلفة',
+                    'financial-aid': 'مساعدة مالية',
+                    'office-supplies': 'لوازم مكتبية',
+                    'transportation': 'مواصلات',
+                    'meals': 'وجبات',
+                    'maintenance': 'صيانة',
+                    'utilities': 'مرافق',
+                    'cleaning': 'نظافة',
+                    'communication': 'اتصالات',
+                    'other': 'أخرى'
+                };
+                
+                let categoryLabel = expense.category;
+                if (isPurchaseLinked) {
+                    categoryLabel = 'مشتريات';
+                } else if (categoryLabels[expense.category]) {
+                    categoryLabel = categoryLabels[expense.category];
+                } else if (expense.category.startsWith('custom-')) {
+                    // Try to get custom category name
+                    try {
+                        const customCategoryDoc = await getDoc(doc(db, 'customCategories', expense.category));
+                        if (customCategoryDoc.exists()) {
+                            categoryLabel = customCategoryDoc.data().name;
+                        }
+                    } catch (error) {
+                        console.error('Error fetching custom category:', error);
+                    }
+                }
+                
+                // Get source label
+                const sourceLabel = expense.source === 'petty-cash' ? 'صندوق العهدة' : 'دفع الشركة';
+                
+                // Format dates
+                const formatDate = (date) => {
+                    if (!date) return 'غير محدد';
+                    const d = date.toDate ? date.toDate() : new Date(date);
+                    return d.toLocaleDateString('ar-EG', {
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                    });
+                };
+                
+                // Populate the expense details modal
+                document.getElementById('print-expense-category').textContent = categoryLabel;
+                document.getElementById('print-expense-amount').textContent = `${expense.amount.toFixed(2)} ج.م`;
+                document.getElementById('print-expense-date').textContent = formatDate(expense.date);
+                document.getElementById('print-expense-source').textContent = sourceLabel;
+                document.getElementById('print-expense-description').textContent = expense.description || 'لا يوجد وصف';
+                document.getElementById('print-expense-employee').textContent = employeeName;
+                document.getElementById('print-expense-box').textContent = boxName;
+                document.getElementById('print-expense-created').textContent = formatDate(expense.createdAt);
+                document.getElementById('print-expense-updated').textContent = formatDate(expense.updatedAt);
+                
+                // Show the expense details modal
+                document.getElementById('expense-details-modal').classList.remove('hidden');
+                
+            } catch (error) {
+                console.error('Error loading expense for printing:', error);
+                alert('حدث خطأ أثناء تحميل تفاصيل المصروف: ' + error.message);
+            }
+        }
+        
+        // Print purchase details
+        async function printPurchase(purchaseId) {
+            if (!firebaseInitialized || !db) return;
+            
+            console.log('Printing purchase', purchaseId);
+            
+            try {
+                // Get purchase data from cache first
+                let purchase = purchasesCache.find(p => p.id === purchaseId);
+                
+                if (!purchase) {
+                    // If not in cache, fetch from database
+                    const purchaseDoc = await getDoc(doc(db, 'purchases', purchaseId));
+                    if (!purchaseDoc.exists()) {
+                        alert('فاتورة الشراء غير موجودة');
+                        return;
+                    }
+                    purchase = { id: purchaseDoc.id, ...purchaseDoc.data() };
+                }
+                
+                // Calculate totals exactly like the existing view
+                const items = Array.isArray(purchase.items) ? purchase.items : [];
+                const subtotal = items.reduce((sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.unitCost) || 0), 0);
+                const vatEnabled = !!purchase.vatEnabled;
+                const vatRate = Number(purchase.vatRate) || 0;
+                const vatAmount = vatEnabled ? (subtotal * (vatRate / 100)) : 0;
+                const total = subtotal + vatAmount;
+                const paidAmount = Number(purchase.paidAmount) || 0;
+                const remaining = total - paidAmount;
+                
+                // Store purchase data globally for printing
+                currentPrintingPurchase = purchase;
+                
+                // Populate the purchase details modal with exact same structure as showPurchaseModal
+                document.getElementById('print-purchase-internal-number').textContent = purchase.internalNumber || 'غير محدد';
+                document.getElementById('print-purchase-invoice-number').textContent = purchase.supplierInvoiceNumber || 'غير محدد';
+                document.getElementById('print-purchase-details-date').textContent = purchase.date || 'غير محدد';
+                document.getElementById('print-purchase-supplier').textContent = purchase.supplierName || 'غير محدد';
+                document.getElementById('print-purchase-payment-method').textContent = purchase.paymentMethod || 'غير محدد';
+                document.getElementById('print-purchase-payment-status').textContent = purchase.paymentStatus || 'غير محدد';
+                document.getElementById('print-purchase-receive-status').textContent = purchase.purchaseStatus || 'غير محدد';
+                document.getElementById('print-purchase-status').textContent = 'نشط'; // Default status
+                
+                document.getElementById('print-purchase-total').textContent = `${total.toFixed(2)} ج.م`;
+                document.getElementById('print-purchase-paid').textContent = `${paidAmount.toFixed(2)} ج.م`;
+                document.getElementById('print-purchase-remaining').textContent = `${remaining.toFixed(2)} ج.م`;
+                document.getElementById('print-purchase-tax').textContent = `${vatAmount.toFixed(2)} ج.م`;
+                
+                // Populate items with exact same structure as showPurchaseModal
+                const itemsContainer = document.getElementById('print-purchase-items');
+                if (items.length > 0) {
+                    itemsContainer.innerHTML = `
+                        <table class="w-full text-right border-collapse border border-gray-300">
+                            <thead class="bg-gray-100">
+                                <tr>
+                                    <th class="border border-gray-300 p-2">المنتج</th>
+                                    <th class="border border-gray-300 p-2">الكمية</th>
+                                    <th class="border border-gray-300 p-2">سعر الوحدة</th>
+                                    <th class="border border-gray-300 p-2">الإجمالي</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${items.map(item => `
+                                    <tr>
+                                        <td class="border border-gray-300 p-2">${item.productName || 'غير محدد'}</td>
+                                        <td class="border border-gray-300 p-2 text-center">${Number(item.quantity) || 0}</td>
+                                        <td class="border border-gray-300 p-2 text-center">${Number(item.unitCost || 0).toFixed(2)} ج.م</td>
+                                        <td class="border border-gray-300 p-2 text-center">${((Number(item.quantity) || 0) * (Number(item.unitCost) || 0)).toFixed(2)} ج.م</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                } else {
+                    itemsContainer.innerHTML = '<p class="text-gray-500 text-center">لا توجد منتجات</p>';
+                }
+                
+                document.getElementById('print-purchase-notes').textContent = purchase.notes || 'لا توجد ملاحظات';
+                
+                // Show the purchase details modal
+                document.getElementById('purchase-details-modal').classList.remove('hidden');
+                
+            } catch (error) {
+                console.error('Error loading purchase for printing:', error);
+                alert('حدث خطأ أثناء تحميل تفاصيل فاتورة الشراء: ' + error.message);
+            }
+        }
+        
+        // Populate printable expense content
+        function populatePrintableExpense() {
+            const expenseToPrint = document.getElementById('expense-to-print');
+            
+            // Get the data from the details modal
+            const category = document.getElementById('print-expense-category').textContent;
+            const amount = document.getElementById('print-expense-amount').textContent;
+            const date = document.getElementById('print-expense-date').textContent;
+            const source = document.getElementById('print-expense-source').textContent;
+            const description = document.getElementById('print-expense-description').textContent;
+            const employee = document.getElementById('print-expense-employee').textContent;
+            const box = document.getElementById('print-expense-box').textContent;
+            const created = document.getElementById('print-expense-created').textContent;
+            const updated = document.getElementById('print-expense-updated').textContent;
+            
+            // Check if this is a purchase-linked expense by looking at the category
+            const isPurchaseLinked = category === 'مشتريات';
+            
+            expenseToPrint.innerHTML = `
+                <div style="font-family: 'Cairo', sans-serif; direction: rtl; text-align: right; padding: 30px; background: white; max-width: 600px; margin: 0 auto;">
+                    <!-- Header -->
+                    <div style="text-align: center; margin-bottom: 30px; border-bottom: 2px solid #1f2937; padding-bottom: 15px;">
+                        <h1 style="font-size: 24px; font-weight: bold; color: #1f2937; margin-bottom: 5px;">فاتورة مصروف</h1>
+                        <div style="font-size: 14px; color: #6b7280;">تاريخ الطباعة: ${new Date().toLocaleDateString('ar-EG', {
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        })}</div>
+                    </div>
+                    
+                    <!-- Fields in exact order as specified -->
+                    <div style="line-height: 2.5;">
+                        <div style="margin-bottom: 20px;">
+                            <div style="font-weight: bold; color: #1f2937; margin-bottom: 5px;">الفئة (Category):</div>
+                            <div style="color: #374151; font-size: 16px;">${category}</div>
+                        </div>
+                        
+                        <div style="margin-bottom: 20px;">
+                            <div style="font-weight: bold; color: #1f2937; margin-bottom: 5px;">الوصف (Description):</div>
+                            <div style="color: #374151; font-size: 16px;">${description}</div>
+                        </div>
+                        
+                        <div style="margin-bottom: 20px;">
+                            <div style="font-weight: bold; color: #1f2937; margin-bottom: 5px;">المبلغ (Amount) (ج.م):</div>
+                            <div style="color: #374151; font-size: 18px; font-weight: bold;">${amount}</div>
+                        </div>
+                        
+                        <div style="margin-bottom: 20px;">
+                            <div style="font-weight: bold; color: #1f2937; margin-bottom: 5px;">الحالة (Status):</div>
+                            <div style="color: #374151; font-size: 16px;">غير محدد</div>
+                        </div>
+                        
+                        <div style="margin-bottom: 20px;">
+                            <div style="font-weight: bold; color: #1f2937; margin-bottom: 5px;">مصدر الدفع (Payment Source):</div>
+                            <div style="color: #374151; font-size: 16px;">${source}</div>
+                        </div>
+                        
+                        <div style="margin-bottom: 20px;">
+                            <div style="font-weight: bold; color: #1f2937; margin-bottom: 5px;">صندوق العهدة (Petty Cash Box):</div>
+                            <div style="color: #374151; font-size: 16px;">${box || '—'}</div>
+                        </div>
+                        
+                        <div style="margin-bottom: 20px;">
+                            <div style="font-weight: bold; color: #1f2937; margin-bottom: 5px;">الموظف (Employee):</div>
+                            <div style="color: #374151; font-size: 16px;">${employee || '—'}</div>
+                        </div>
+                        
+                        <!-- Visual separator line -->
+                        <div style="border-top: 2px solid #e5e7eb; margin: 30px 0; padding-top: 20px;">
+                        
+                        <div style="margin-bottom: 20px;">
+                            <div style="font-weight: bold; color: #1f2937; margin-bottom: 5px;">التاريخ (Date):</div>
+                            <div style="color: #374151; font-size: 16px;">${date}</div>
+                        </div>
+                        
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Populate printable purchase content
+        function populatePrintablePurchase(purchase = null) {
+            const purchaseToPrint = document.getElementById('purchase-details-to-print');
+            
+            // Get the data from the details modal or use provided purchase data
+            let internalNumber, invoiceNumber, date, supplier, paymentMethod, paymentStatus, receiveStatus, status, total, paid, remaining, tax, items, notes;
+            
+            if (purchase) {
+                // Use provided purchase data
+                internalNumber = purchase.internalNumber || 'غير محدد';
+                invoiceNumber = purchase.supplierInvoiceNumber || 'غير محدد';
+                date = purchase.date || 'غير محدد';
+                supplier = purchase.supplierName || 'غير محدد';
+                paymentMethod = purchase.paymentMethod || 'غير محدد';
+                paymentStatus = purchase.paymentStatus || 'غير محدد';
+                receiveStatus = purchase.purchaseStatus || 'غير محدد';
+                status = 'نشط';
+                
+                // Calculate totals
+                const itemsArray = Array.isArray(purchase.items) ? purchase.items : [];
+                const subtotal = itemsArray.reduce((sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.unitCost) || 0), 0);
+                const vatEnabled = !!purchase.vatEnabled;
+                const vatRate = Number(purchase.vatRate) || 0;
+                const vatAmount = vatEnabled ? (subtotal * (vatRate / 100)) : 0;
+                const totalAmount = subtotal + vatAmount;
+                const paidAmount = Number(purchase.paidAmount) || 0;
+                const remainingAmount = totalAmount - paidAmount;
+                
+                total = `${totalAmount.toFixed(2)} ج.م`;
+                paid = `${paidAmount.toFixed(2)} ج.م`;
+                remaining = `${remainingAmount.toFixed(2)} ج.م`;
+                tax = `${vatAmount.toFixed(2)} ج.م`;
+                notes = purchase.notes || 'لا توجد ملاحظات';
+                
+                // Generate items HTML
+                if (itemsArray.length > 0) {
+                    items = `
+                        <table class="w-full text-right border-collapse border border-gray-300">
+                            <thead class="bg-gray-100">
+                                <tr>
+                                    <th class="border border-gray-300 p-2">المنتج</th>
+                                    <th class="border border-gray-300 p-2">الكمية</th>
+                                    <th class="border border-gray-300 p-2">سعر الوحدة</th>
+                                    <th class="border border-gray-300 p-2">المجموع</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${itemsArray.map(item => `
+                                    <tr>
+                                        <td class="border border-gray-300 p-2">${item.productName || 'غير محدد'}</td>
+                                        <td class="border border-gray-300 p-2">${item.quantity || 0}</td>
+                                        <td class="border border-gray-300 p-2">${Number(item.unitCost || 0).toFixed(2)} ج.م</td>
+                                        <td class="border border-gray-300 p-2">${((Number(item.quantity) || 0) * (Number(item.unitCost) || 0)).toFixed(2)} ج.م</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                } else {
+                    items = '<p class="text-gray-500">لا توجد عناصر</p>';
+                }
+            } else {
+                // Fallback to DOM elements
+                internalNumber = document.getElementById('print-purchase-internal-number').textContent;
+                invoiceNumber = document.getElementById('print-purchase-invoice-number').textContent;
+                date = document.getElementById('print-purchase-details-date').textContent;
+                supplier = document.getElementById('print-purchase-supplier').textContent;
+                paymentMethod = document.getElementById('print-purchase-payment-method').textContent;
+                paymentStatus = document.getElementById('print-purchase-payment-status').textContent;
+                receiveStatus = document.getElementById('print-purchase-receive-status').textContent;
+                status = document.getElementById('print-purchase-status').textContent;
+                total = document.getElementById('print-purchase-total').textContent;
+                paid = document.getElementById('print-purchase-paid').textContent;
+                remaining = document.getElementById('print-purchase-remaining').textContent;
+                tax = document.getElementById('print-purchase-tax').textContent;
+                items = document.getElementById('print-purchase-items').innerHTML;
+                notes = document.getElementById('print-purchase-notes').textContent;
+            }
+            
+            // Extract numeric values for calculations
+            const totalValue = parseFloat(total.replace(/[^\d.-]/g, '')) || 0;
+            const paidValue = parseFloat(paid.replace(/[^\d.-]/g, '')) || 0;
+            const remainingValue = parseFloat(remaining.replace(/[^\d.-]/g, '')) || 0;
+            const taxValue = parseFloat(tax.replace(/[^\d.-]/g, '')) || 0;
+            const subtotalValue = totalValue - taxValue;
+            
+            purchaseToPrint.innerHTML = `
+                <div style="font-family: 'Cairo', sans-serif; direction: rtl; text-align: right; padding: 30px; background: white; max-width: 600px; margin: 0 auto;">
+                    <!-- Header -->
+                    <div style="text-align: center; margin-bottom: 30px; border-bottom: 2px solid #1f2937; padding-bottom: 15px;">
+                        <h1 style="font-size: 24px; font-weight: bold; color: #1f2937; margin-bottom: 5px;">فاتورة شراء</h1>
+                        <div style="font-size: 14px; color: #6b7280;">تاريخ الطباعة: ${new Date().toLocaleDateString('ar-EG', {
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        })}</div>
+                    </div>
+                    
+                    <!-- Fields in exact order as specified -->
+                    <div style="line-height: 2.5;">
+                        <div style="margin-bottom: 20px;">
+                            <div style="font-weight: bold; color: #1f2937; margin-bottom: 5px;">المورد (Supplier):</div>
+                            <div style="color: #374151; font-size: 16px;">${supplier}</div>
+                        </div>
+                        
+                        <div style="margin-bottom: 20px;">
+                            <div style="font-weight: bold; color: #1f2937; margin-bottom: 5px;">رقم الفاتورة (Invoice Number):</div>
+                            <div style="color: #374151; font-size: 16px;">${invoiceNumber}</div>
+                        </div>
+                        
+                        <div style="margin-bottom: 20px;">
+                            <div style="font-weight: bold; color: #1f2937; margin-bottom: 5px;">طريقة الدفع (Payment Method):</div>
+                            <div style="color: #374151; font-size: 16px;">${paymentMethod}</div>
+                        </div>
+                        
+                        <div style="margin-bottom: 20px;">
+                            <div style="font-weight: bold; color: #1f2937; margin-bottom: 5px;">الوصف (Description):</div>
+                            <div style="color: #374151; font-size: 16px;">${notes || '—'}</div>
+                        </div>
+                        
+                        <!-- Visual separator line -->
+                        <div style="border-top: 2px solid #e5e7eb; margin: 30px 0; padding-top: 20px;">
+                        
+                        <div style="margin-bottom: 20px;">
+                            <div style="font-weight: bold; color: #1f2937; margin-bottom: 5px;">المبلغ الإجمالي (Total Amount) (ج.م):</div>
+                            <div style="color: #374151; font-size: 18px; font-weight: bold;">${totalValue.toFixed(2)}</div>
+                        </div>
+                        
+                        <div style="margin-bottom: 20px;">
+                            <div style="font-weight: bold; color: #1f2937; margin-bottom: 5px;">التاريخ (Date):</div>
+                            <div style="color: #374151; font-size: 16px;">${date}</div>
+                        </div>
+                        
+                        </div>
+                    </div>
+                </div>
+            `;
         }
         
         // Permanent delete expense (for purchase-linked expenses)
@@ -8685,7 +9987,49 @@
                     alert('يجب إدخال اسم الفئة الجديدة');
                     return;
                 }
-                category = customCategoryName.toLowerCase().replace(/\s+/g, '-');
+                // Save the custom category to database and get its ID
+                try {
+                    const customCategoryId = await saveCustomCategory(customCategoryName);
+                    category = `custom-${customCategoryId}`;
+                    // Add the new category to the dropdown immediately
+                    const expenseCategorySelect = document.getElementById('expense-category');
+                    if (expenseCategorySelect) {
+                        const option = document.createElement('option');
+                        option.value = `custom-${customCategoryId}`;
+                        option.textContent = customCategoryName;
+                        option.selected = true; // Select the newly created category
+                        
+                        // Insert before the "add new category" option
+                        const addNewOption = expenseCategorySelect.querySelector('option[value="add-new-category"]');
+                        if (addNewOption) {
+                            expenseCategorySelect.insertBefore(option, addNewOption);
+                        } else {
+                            expenseCategorySelect.appendChild(option);
+                        }
+                        
+                        // Add to categoryLabels for display purposes
+                        categoryLabels[`custom-${customCategoryId}`] = customCategoryName;
+                    }
+                } catch (error) {
+                    alert('فشل في حفظ الفئة الجديدة: ' + error.message);
+                    return;
+                }
+            } else if (category.startsWith('custom-')) {
+                // Handle existing custom category - extract the actual category name
+                const customCategoryId = category.replace('custom-', '');
+                try {
+                    const customCategoryDoc = await getDoc(doc(db, 'customExpenseCategories', customCategoryId));
+                    if (customCategoryDoc.exists()) {
+                        const customCategoryData = customCategoryDoc.data();
+                        category = customCategoryData.name.toLowerCase().replace(/\s+/g, '-');
+                    } else {
+                        alert('الفئة المخصصة غير موجودة');
+                        return;
+                    }
+                } catch (error) {
+                    alert('خطأ في تحميل الفئة المخصصة: ' + error.message);
+                    return;
+                }
             }
             
             // Only require petty cash box if the expense source is petty-cash
@@ -8944,7 +10288,7 @@
                 });
                 
                 if (allTransactions.length === 0) {
-                    expensesTableBody.innerHTML = '<tr><td colspan="8" class="p-4 text-center text-gray-500">لا توجد مصروفات حتى الآن</td></tr>';
+                    expensesTableBody.innerHTML = '<tr><td colspan="9" class="p-4 text-center text-gray-500">لا توجد مصروفات حتى الآن</td></tr>';
                     return;
                 }
                 
@@ -8966,6 +10310,7 @@
                 
                 expensesTableBody.innerHTML = '';
                 let totalAmount = 0;
+                let serialNumber = 1;
                 
                 allTransactions.forEach(transaction => {
                     const row = document.createElement('tr');
@@ -9005,6 +10350,7 @@
                     if (transaction.type === 'expense') {
                         actionButtons = `
                             <div class="flex space-x-2 space-x-reverse">
+                                <button class="text-green-600 hover:text-green-800 print-expense-btn" data-expense-id="${transaction.id}">طباعة</button>
                                 <button class="text-blue-600 hover:text-blue-800 edit-expense-btn" data-expense-id="${transaction.id}">تعديل</button>
                                 <button class="text-red-600 hover:text-red-800 delete-expense-btn" data-expense-id="${transaction.id}">حذف</button>
                             </div>
@@ -9026,6 +10372,7 @@
                     }
                     
                     row.innerHTML = `
+                        <td class="px-4 py-3 text-center font-semibold text-gray-600">${serialNumber}</td>
                         <td class="px-4 py-3">${transactionDate}</td>
                         <td class="px-4 py-3">${categoryLabel}</td>
                         <td class="px-4 py-3">${transaction.description || 'N/A'}</td>
@@ -9044,19 +10391,20 @@
                     
                     expensesTableBody.appendChild(row);
                     totalAmount += transaction.amount;
+                    serialNumber++;
                 });
                 
                 // Add total row
                 const totalRow = document.createElement('tr');
                 totalRow.className = 'bg-gray-100 font-bold';
                 totalRow.innerHTML = `
-                    <td colspan="7" class="px-4 py-3 text-right">المجموع الكلي:</td>
+                    <td colspan="8" class="px-4 py-3 text-right">المجموع الكلي:</td>
                     <td class="px-4 py-3 font-bold text-lg">${totalAmount.toFixed(2)} ج.م</td>
                 `;
                 expensesTableBody.appendChild(totalRow);
             } catch (error) {
                 console.error('Error fetching expenses:', error);
-                expensesTableBody.innerHTML = '<tr><td colspan="8" class="p-4 text-center text-red-500">حدث خطأ أثناء تحميل البيانات</td></tr>';
+                expensesTableBody.innerHTML = '<tr><td colspan="9" class="p-4 text-center text-red-500">حدث خطأ أثناء تحميل البيانات</td></tr>';
             }
         }
         
@@ -9788,6 +11136,114 @@
             cancelExpenseBtn.addEventListener('click', closeExpenseModal);
         }
         
+        // Expense details modal event listeners
+        const closeExpenseDetailsBtn = document.getElementById('close-expense-details-btn');
+        const printExpenseBtn = document.getElementById('print-expense-btn');
+        const executeExpensePrintBtn = document.getElementById('execute-expense-print-btn');
+        const closeExpensePrintModalBtn = document.getElementById('close-expense-print-modal-btn');
+        
+        if (closeExpenseDetailsBtn) {
+            closeExpenseDetailsBtn.addEventListener('click', () => {
+                document.getElementById('expense-details-modal').classList.add('hidden');
+            });
+        }
+        
+        if (printExpenseBtn) {
+            printExpenseBtn.addEventListener('click', () => {
+                // Hide the details modal and show the printable modal
+                document.getElementById('expense-details-modal').classList.add('hidden');
+                document.getElementById('printable-expense-modal').classList.remove('hidden');
+                
+                // Populate the printable content
+                populatePrintableExpense();
+            });
+        }
+        
+        if (executeExpensePrintBtn) {
+            executeExpensePrintBtn.addEventListener('click', async () => {
+                try {
+                    // Get the expense description for filename
+                    const expenseDescription = document.getElementById('print-expense-description').textContent || 'Expense';
+                    const serialNumber = getNextPdfSerial();
+                    
+                    // Clean the description for filename (remove special characters)
+                    const cleanDescription = expenseDescription.replace(/[<>:"/\\|?*]/g, '').trim();
+                    const filename = `${serialNumber} - ${cleanDescription}.pdf`;
+                    
+                    console.log('Generating PDF with filename:', filename);
+                    
+                    // Generate and save PDF
+                    await generatePDF('expense-to-print', filename);
+                    
+                    // Also trigger browser print dialog
+                    window.print();
+                } catch (error) {
+                    console.error('Error in expense print:', error);
+                    alert('حدث خطأ أثناء طباعة المصروف: ' + error.message);
+                }
+            });
+        }
+        
+        if (closeExpensePrintModalBtn) {
+            closeExpensePrintModalBtn.addEventListener('click', () => {
+                document.getElementById('printable-expense-modal').classList.add('hidden');
+            });
+        }
+        
+        // Purchase details modal event listeners
+        const closePurchaseDetailsBtn = document.getElementById('close-purchase-details-btn');
+        const printPurchaseDetailsBtn = document.getElementById('print-purchase-details-btn');
+        const executePurchaseDetailsPrintBtn = document.getElementById('execute-purchase-details-print-btn');
+        const closePurchaseDetailsPrintModalBtn = document.getElementById('close-purchase-details-print-modal-btn');
+        
+        if (closePurchaseDetailsBtn) {
+            closePurchaseDetailsBtn.addEventListener('click', () => {
+                document.getElementById('purchase-details-modal').classList.add('hidden');
+            });
+        }
+        
+        if (printPurchaseDetailsBtn) {
+            printPurchaseDetailsBtn.addEventListener('click', () => {
+                // Hide the details modal and show the printable modal
+                document.getElementById('purchase-details-modal').classList.add('hidden');
+                document.getElementById('printable-purchase-details-modal').classList.remove('hidden');
+                
+                // Populate the printable content
+                populatePrintablePurchase(currentPrintingPurchase);
+            });
+        }
+        
+        if (executePurchaseDetailsPrintBtn) {
+            executePurchaseDetailsPrintBtn.addEventListener('click', async () => {
+                try {
+                    // Get the purchase description for filename
+                    const purchaseDescription = document.getElementById('print-purchase-supplier').textContent || 'Purchase';
+                    const serialNumber = getNextPdfSerial();
+                    
+                    // Clean the description for filename (remove special characters)
+                    const cleanDescription = purchaseDescription.replace(/[<>:"/\\|?*]/g, '').trim();
+                    const filename = `${serialNumber} - ${cleanDescription}.pdf`;
+                    
+                    console.log('Generating PDF with filename:', filename);
+                    
+                    // Generate and save PDF
+                    await generatePDF('purchase-details-to-print', filename);
+                    
+                    // Also trigger browser print dialog
+                    window.print();
+                } catch (error) {
+                    console.error('Error in purchase print:', error);
+                    alert('حدث خطأ أثناء طباعة فاتورة الشراء: ' + error.message);
+                }
+            });
+        }
+        
+        if (closePurchaseDetailsPrintModalBtn) {
+            closePurchaseDetailsPrintModalBtn.addEventListener('click', () => {
+                document.getElementById('printable-purchase-details-modal').classList.add('hidden');
+            });
+        }
+        
         if (closeBoxBtn) {
             closeBoxBtn.addEventListener('click', closePettyCashBox);
         }
@@ -9806,7 +11262,7 @@
         const customCategoryName = document.getElementById('custom-category-name');
         
         if (expenseCategorySelect) {
-            expenseCategorySelect.addEventListener('change', function() {
+            expenseCategorySelect.addEventListener('change', async function() {
                 if (this.value === 'add-new-category') {
                     customCategoryDiv.classList.remove('hidden');
                     customCategoryName.required = true;
@@ -9819,6 +11275,11 @@
                 
                 // Update employee field requirement based on category
                 updateEmployeeFieldRequirement(this.value);
+                
+                // Check expense balance to update employee selection visibility
+                checkExpenseBalance();
+                
+                // No need to reload categories on every change - they're already loaded when modal opens
             });
         }
         
@@ -9872,6 +11333,11 @@
             if (e.target.classList.contains('delete-expense-btn')) {
                 const expenseId = e.target.getAttribute('data-expense-id');
                 deleteExpense(expenseId);
+            }
+            
+            if (e.target.classList.contains('print-expense-btn')) {
+                const expenseId = e.target.getAttribute('data-expense-id');
+                printExpense(expenseId);
             }
             
             if (e.target.classList.contains('permanent-delete-expense-btn')) {

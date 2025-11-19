@@ -159,5 +159,16 @@ service cloud.firestore {
       allow update: if isAdmin();
       allow delete: if isAdmin();
     }
+
+    // Custom Expense Categories: admins/editors can create/read; update/delete admin-only
+    match /customExpenseCategories/{categoryId} {
+      allow read: if isAdmin() || isEditor();
+      allow create: if (isAdmin() || isEditor()) &&
+        request.resource.data.name is string &&
+        request.resource.data.name.size() > 0 &&
+        request.resource.data.createdAt is timestamp;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
   }
 }
