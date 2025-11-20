@@ -2386,7 +2386,7 @@
 <script type="module">
     // --- Firebase SDKs and Initialization ---
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getFirestore, collection, addDoc, getDocs, query, orderBy, doc, setDoc, getDoc, runTransaction, where, increment, serverTimestamp, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { getFirestore, collection, addDoc, getDocs, query, orderBy, doc, setDoc, getDoc, runTransaction, where, increment, serverTimestamp, updateDoc, deleteDoc, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
     import { 
         getAuth, 
         onAuthStateChanged,
@@ -3538,16 +3538,41 @@
         };
         
         // --- DATA FETCHING FUNCTIONS ---
-        const fetchAndDisplayInvoices = async (channelFilter = '') => {
+        // Track if invoices are already loaded to prevent unnecessary reloads
+        let invoicesLastLoaded = null;
+        const INVOICES_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes cache
+        
+        const fetchAndDisplayInvoices = async (channelFilter = '', forceReload = false) => {
              if (!db || !salesGroupsContainer) return;
+            
+            // OPTIMIZATION: Check cache - don't reload if data is fresh and no filter change
+            const now = Date.now();
+            if (!forceReload && invoicesLastLoaded && (now - invoicesLastLoaded) < INVOICES_CACHE_DURATION && 
+                invoiceData && Object.keys(invoiceData).length > 0 && !channelFilter) {
+                console.log('[Quota Usage] Using cached invoices (0 reads)');
+                // Re-apply filters if needed
+                if (channelFilter) {
+                    filteredInvoices = allInvoices.filter(inv => inv.invoice.channel === channelFilter);
+                } else {
+                    filteredInvoices = [...allInvoices];
+                }
+                displayFilteredInvoices(filteredInvoices);
+                return;
+            }
+            
             salesGroupsContainer.innerHTML = '<div class="p-4 text-center text-gray-500">جاري تحميل الفواتير...</div>';
             try {
-                const q = query(collection(db, "invoices"), orderBy("createdAt", "desc"));
+                // OPTIMIZATION: Use limit for initial load (pagination)
+                const INVOICES_PER_PAGE = 100; // Load first 100, can expand later if needed
+                const q = query(collection(db, "invoices"), orderBy("createdAt", "desc"), limit(INVOICES_PER_PAGE));
                 const querySnapshot = await getDocs(q);
+                console.log(`[Quota Usage] Loaded ${querySnapshot.size} invoices (${querySnapshot.size} reads)`);
                 
                 // Store all invoices for search functionality
-                allInvoices = [];
-                invoiceData = {};
+                if (forceReload || !invoiceData) {
+                    allInvoices = [];
+                    invoiceData = {};
+                }
                 
                 querySnapshot.forEach((docSnap) => {
                     const invoice = docSnap.data();
@@ -3565,11 +3590,17 @@
                         return; // Skip this invoice if it doesn't match the filter
                     }
                     
-                    allInvoices.push({ id: invoiceId, invoice });
+                    // Only add if not already in allInvoices
+                    if (!allInvoices.find(inv => inv.id === invoiceId)) {
+                        allInvoices.push({ id: invoiceId, invoice });
+                    }
                 });
                 
                 // Initialize filtered invoices with all invoices
                 filteredInvoices = [...allInvoices];
+                
+                // Update cache timestamp
+                invoicesLastLoaded = now;
                 
                 // Display all invoices initially
                 displayFilteredInvoices(filteredInvoices);
@@ -3580,55 +3611,127 @@
             }
         };
         
-        const fetchAndDisplayProducts = async () => {
+        // Track if products are already loaded to prevent unnecessary reloads
+        let productsLastLoaded = null;
+        let productsLoading = false;
+        const PRODUCTS_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes cache
+        
+        const fetchAndDisplayProducts = async (loadLocationQuantities = false, forceReload = false) => {
             if (!db || !inventoryTableBody) return;
+            
+            // OPTIMIZATION: Prevent concurrent loads
+            if (productsLoading) {
+                console.log('[Quota Usage] Products already loading, skipping...');
+                return;
+            }
+            
+            // OPTIMIZATION: Check cache - don't reload if data is fresh
+            const now = Date.now();
+            if (!forceReload && productsLastLoaded && (now - productsLastLoaded) < PRODUCTS_CACHE_DURATION && 
+                productsCache && productsCache.length > 0) {
+                console.log('[Quota Usage] Using cached products (0 reads)');
+                // Only reload location quantities if requested
+                if (loadLocationQuantities) {
+                    // Load location quantities for cached products
+                    const productPromises = [];
+                    productsCache.forEach(product => {
+                        productPromises.push(calculateLocationQuantities(product.id).then(locations => ({ 
+                            id: product.id, 
+                            locations 
+                        })).catch(err => {
+                            console.warn(`Failed to load location quantities for product ${product.id}:`, err);
+                            return { id: product.id, locations: { warehouse: 0, showroom: 0, total: 0 } };
+                        }));
+                    });
+                    const productsWithLocations = await Promise.all(productPromises);
+                    allProducts = allProducts.map(product => {
+                        const productWithLocations = productsWithLocations.find(p => p.id === product.id);
+                        return {
+                            ...product,
+                            warehouseQty: productWithLocations ? productWithLocations.locations.warehouse : 0,
+                            showroomQty: productWithLocations ? productWithLocations.locations.showroom : 0
+                        };
+                    });
+                    displayFilteredProducts(filteredProducts || allProducts);
+                } else {
+                    displayFilteredProducts(filteredProducts || allProducts);
+                }
+                return;
+            }
+            
+            productsLoading = true;
             inventoryTableBody.innerHTML = '<tr><td colspan="9" class="p-4 text-center text-gray-500">جاري تحميل المنتجات...</td></tr>';
             try {
-                productsCache = []; // Clear cache before fetching
-                allProducts = []; // Clear all products array
+                if (forceReload || !productsCache || productsCache.length === 0) {
+                    productsCache = []; // Clear cache before fetching
+                    allProducts = []; // Clear all products array
+                }
                 const q = query(collection(db, "products"), orderBy("createdAt", "desc"));
                 const querySnapshot = await getDocs(q);
+                console.log(`[Quota Usage] Loaded ${querySnapshot.size} products (${querySnapshot.size} reads)`);
                 inventoryTableBody.innerHTML = '';
                 if (querySnapshot.empty) {
                     inventoryTableBody.innerHTML = '<tr><td colspan="9" class="p-4 text-center text-gray-500">لا توجد منتجات بالمخزن.</td></tr>';
                     return;
                 }
                 
-                // Process products with location quantities
-                const productPromises = [];
+                // Process products - skip location quantities by default to save quota
                 querySnapshot.forEach((doc) => {
                     const product = doc.data();
                     if (product && product.deleted === true) { return; }
-                    const productWithId = { id: doc.id, ...product };
+                    const productWithId = { 
+                        id: doc.id, 
+                        ...product,
+                        warehouseQty: 0, // Default values, will be calculated on demand if needed
+                        showroomQty: 0
+                    };
                     productsCache.push(productWithId); // Add to cache
                     allProducts.push(productWithId); // Add to all products for search
-                    productPromises.push(calculateLocationQuantities(doc.id).then(locations => ({ 
-                        id: doc.id, 
-                        product, 
-                        locations 
-                    })));
                 });
                 
-                const productsWithLocations = await Promise.all(productPromises);
-                
-                // Store products with locations for search functionality
-                allProducts = allProducts.map(product => {
-                    const productWithLocations = productsWithLocations.find(p => p.id === product.id);
-                    return {
-                        ...product,
-                        warehouseQty: productWithLocations ? productWithLocations.locations.warehouse : 0,
-                        showroomQty: productWithLocations ? productWithLocations.locations.showroom : 0
-                    };
-                });
+                // Only load location quantities if explicitly requested (to save quota)
+                if (loadLocationQuantities) {
+                    const productPromises = [];
+                    allProducts.forEach(product => {
+                        productPromises.push(calculateLocationQuantities(product.id).then(locations => ({ 
+                            id: product.id, 
+                            locations 
+                        })).catch(err => {
+                            console.warn(`Failed to load location quantities for product ${product.id}:`, err);
+                            return { id: product.id, locations: { warehouse: 0, showroom: 0, total: 0 } };
+                        }));
+                    });
+                    
+                    const productsWithLocations = await Promise.all(productPromises);
+                    
+                    // Update products with location quantities
+                    allProducts = allProducts.map(product => {
+                        const productWithLocations = productsWithLocations.find(p => p.id === product.id);
+                        return {
+                            ...product,
+                            warehouseQty: productWithLocations ? productWithLocations.locations.warehouse : 0,
+                            showroomQty: productWithLocations ? productWithLocations.locations.showroom : 0
+                        };
+                    });
+                }
                 
                 // Initialize filtered products with all products
                 filteredProducts = [...allProducts];
+                
+                // Update cache timestamp
+                productsLastLoaded = now;
                 
                 // Display all products initially
                 displayFilteredProducts(filteredProducts);
             } catch (error) {
                 console.error("Error fetching products:", error);
-                inventoryTableBody.innerHTML = '<tr><td colspan="9" class="p-4 text-center text-red-500">حدث خطأ أثناء تحميل المنتجات.</td></tr>';
+                let errorMessage = 'حدث خطأ أثناء تحميل المنتجات.';
+                if (error.code === 'resource-exhausted' || error.message.includes('Quota exceeded')) {
+                    errorMessage = 'تم تجاوز الحد المسموح من قاعدة البيانات. يرجى المحاولة لاحقاً أو ترقية الخطة.';
+                }
+                inventoryTableBody.innerHTML = `<tr><td colspan="9" class="p-4 text-center text-red-500">${errorMessage}</td></tr>`;
+            } finally {
+                productsLoading = false;
             }
         };
 
@@ -3974,9 +4077,28 @@
             if (!db || !manualNumber || manualNumber.trim() === '') return false;
             
             try {
+                // OPTIMIZATION: Check local cache first (saves Firestore reads)
+                if (invoiceData && Object.keys(invoiceData).length > 0) {
+                    for (const [invoiceId, invoice] of Object.entries(invoiceData)) {
+                        if (excludeInvoiceId && invoiceId === excludeInvoiceId) {
+                            continue; // Skip the current invoice being edited
+                        }
+                        if (invoice.manualInvoiceNumber && invoice.manualInvoiceNumber.trim() === manualNumber.trim()) {
+                            console.log('[Quota Usage] Duplicate found in cache (0 reads)');
+                            return true; // Found a duplicate in cache
+                        }
+                    }
+                    // If we have a good cache, trust it (no need to query Firestore)
+                    console.log('[Quota Usage] No duplicate in cache (0 reads)');
+                    return false;
+                }
+                
+                // Fallback to Firestore query only if cache is empty
+                console.log('[Quota Usage] Cache empty, querying Firestore...');
                 const invoicesRef = collection(db, 'invoices');
                 const q = query(invoicesRef, where('manualInvoiceNumber', '==', manualNumber.trim()));
                 const querySnapshot = await getDocs(q);
+                console.log(`[Quota Usage] Duplicate check query returned ${querySnapshot.size} results (${querySnapshot.size} reads)`);
                 
                 // Check if any invoice has this manual number (excluding the current one if editing)
                 for (const docSnapshot of querySnapshot.docs) {
@@ -4431,8 +4553,21 @@
                     try {
                         const createdBy = (auth && auth.currentUser) ? auth.currentUser.uid : null;
                         await addDoc(collection(db, 'payments'), { invoiceId, amount, method, paidAt, createdAt: new Date(), createdBy });
-                        await recalcInvoicePaymentState(invoiceId);
-                        await fetchAndDisplayInvoices();
+                        // Recalculate payment state and get updated data
+                        const updatedInvoice = await recalcInvoicePaymentState(invoiceId);
+                        // Update local cache instead of full reload
+                        if (updatedInvoice && invoiceData) {
+                            invoiceData[invoiceId] = { ...updatedInvoice, id: invoiceId };
+                            const invoiceIndex = allInvoices.findIndex(inv => inv.id === invoiceId);
+                            if (invoiceIndex >= 0) {
+                                allInvoices[invoiceIndex].invoice = { ...updatedInvoice, id: invoiceId };
+                            }
+                            const filteredIndex = filteredInvoices.findIndex(inv => inv.id === invoiceId);
+                            if (filteredIndex >= 0) {
+                                filteredInvoices[filteredIndex].invoice = { ...updatedInvoice, id: invoiceId };
+                            }
+                            displayFilteredInvoices(filteredInvoices);
+                        }
                         if (typeof calculateSalesAnalytics === 'function') calculateSalesAnalytics();
                         showViewModal(invoiceId);
                     } catch (e) {
@@ -5378,12 +5513,16 @@
         function hidePrintableStockOutModal() {
             if (printableStockOutModal) printableStockOutModal.classList.add('hidden');
         }
-        async function recalcInvoicePaymentState(invoiceId) {
-            if (!db) return;
+        async function recalcInvoicePaymentState(invoiceId, invoiceData = null) {
+            if (!db) return null;
             const invoiceRef = doc(db, 'invoices', invoiceId);
-            const snap = await getDoc(invoiceRef);
-            if (!snap.exists()) return;
-            const inv = snap.data();
+            let inv = invoiceData;
+            // Only read invoice if data not provided
+            if (!inv) {
+                const snap = await getDoc(invoiceRef);
+                if (!snap.exists()) return null;
+                inv = snap.data();
+            }
             const paymentsQ = query(collection(db, 'payments'), where('invoiceId', '==', invoiceId));
             const paymentsSnap = await getDocs(paymentsQ);
             let paidSum = 0;
@@ -5394,6 +5533,15 @@
             if (paidSum >= total && total > 0) paymentStatus = 'مدفوع بالكامل';
             else if (paidSum > 0) paymentStatus = 'مدفوع جزئياً';
             await setDoc(invoiceRef, { paidAmount: paidSum, amountDue, paymentStatus, updatedAt: new Date() }, { merge: true });
+            
+            // Return updated invoice data with recalculated payment state
+            return {
+                ...inv,
+                paidAmount: paidSum,
+                amountDue,
+                paymentStatus,
+                updatedAt: new Date()
+            };
         }
         async function voidInvoice(invoiceId) {
             if (!db) { alert('لا يمكن تنفيذ العملية الآن.'); return; }
@@ -5461,8 +5609,8 @@
                 for (const p of revSnap.docs) {
                     await deleteDoc(doc(db, 'payments', p.id));
                 }
-                await fetchAndDisplayInvoices();
-                await fetchAndDisplayProducts();
+                        await fetchAndDisplayInvoices('', true); // Force reload on login
+                        await fetchAndDisplayProducts(false, true); // Force reload on login
                 if (typeof calculateSalesAnalytics === 'function') calculateSalesAnalytics();
                 alert('تم إلغاء الفاتورة وعكس المخزون.');
             } catch (err) {
@@ -5665,7 +5813,9 @@
                     
                     // CRITICAL: Check for duplicate manual invoice number (ONLY for new invoices)
                     if (manualInvoiceNumber && !currentEditingInvoiceId) {
+                        console.log('[Quota Usage] Checking for duplicate manual invoice number...');
                         const isDuplicate = await checkManualInvoiceNumberExists(manualInvoiceNumber, currentEditingInvoiceId);
+                        console.log('[Quota Usage] Duplicate check completed');
                         if (isDuplicate) {
                             alert(`رقم الفاتورة اليدوي "${manualInvoiceNumber}" موجود بالفعل. يرجى استخدام رقم مختلف.`);
                             saveInvoiceBtn.textContent = 'حفظ الفاتورة';
@@ -5676,7 +5826,9 @@
                     
                     // CRITICAL: Check for duplicate invoice content (same customer, date, total, items)
                     if (!currentEditingInvoiceId) {
+                        console.log('[Quota Usage] Checking for duplicate invoice content...');
                         const isContentDuplicate = await checkInvoiceContentDuplicate(customer, date, invoiceTotal, itemsToSave);
+                        console.log('[Quota Usage] Content duplicate check completed');
                         if (isContentDuplicate) {
                             alert(`تحذير: فاتورة مماثلة موجودة بالفعل لنفس العميل والتاريخ والمبلغ. يرجى التحقق من البيانات أو إضافة تفاصيل مختلفة.`);
                             saveInvoiceBtn.textContent = 'حفظ الفاتورة';
@@ -5711,13 +5863,48 @@
                             });
                         }
                         
-                        await recalcInvoicePaymentState(currentEditingInvoiceId);
+                        // Recalc payment state using invoice data we already have (avoid re-reading)
+                        // Get the updated invoice data with recalculated payment state
+                        const recalculatedInvoiceData = await recalcInvoicePaymentState(currentEditingInvoiceId, updatedInvoiceData);
+                        
+                        // Use recalculated data if available, otherwise fall back to updatedInvoiceData
+                        const finalInvoiceData = recalculatedInvoiceData || updatedInvoiceData;
+                        
+                        // Update local cache with recalculated payment state
+                        if (invoiceData) {
+                            invoiceData[currentEditingInvoiceId] = { ...finalInvoiceData, id: currentEditingInvoiceId };
+                        }
+                        const invoiceIndex = allInvoices.findIndex(inv => inv.id === currentEditingInvoiceId);
+                        if (invoiceIndex >= 0) {
+                            allInvoices[invoiceIndex].invoice = { ...finalInvoiceData, id: currentEditingInvoiceId };
+                        }
+                        const filteredIndex = filteredInvoices.findIndex(inv => inv.id === currentEditingInvoiceId);
+                        if (filteredIndex >= 0) {
+                            filteredInvoices[filteredIndex].invoice = { ...finalInvoiceData, id: currentEditingInvoiceId };
+                        }
+                        displayFilteredInvoices(filteredInvoices);
                     } else {
                         // Pre-create invoice ref to capture ID for stock movements
                         const invoiceRef = doc(collection(db, 'invoices'));
+                        
+                        // Safety check: Firestore transactions have a limit of 500 document reads
+                        if (itemsToSave.length > 400) {
+                            alert(`عدد المنتجات كبير جداً (${itemsToSave.length}). الحد الأقصى للفاتورة الواحدة هو 400 منتج. يرجى تقسيم الفاتورة إلى فواتير أصغر.`);
+                            saveInvoiceBtn.disabled = false;
+                            saveInvoiceBtn.textContent = 'حفظ الفاتورة';
+                            return;
+                        }
+                        
+                        console.log('[Quota Usage] Getting invoice number...');
                         const invoiceNumber = await getNextInvoiceNumber();
+                        console.log('[Quota Usage] Invoice number obtained');
+                        const newInvoiceData = { customer, date, channel, paymentMethod, description, manualInvoiceNumber, invoiceNumber, discount: finalDiscount, discountPercent, subtotal, total: invoiceTotal, amountDue, items: itemsToSave, createdAt: new Date(), createdBy: (auth && auth.currentUser) ? auth.currentUser.uid : null };
+                        
+                        // Track which products had inventory (to avoid re-reading later)
+                        const productsWithInventory = [];
+                        
+                        console.log(`[Quota Usage] Starting transaction with ${itemsToSave.length} items...`);
                         await runTransaction(db, async (transaction) => {
-                            const newInvoiceData = { customer, date, channel, paymentMethod, description, manualInvoiceNumber, invoiceNumber, discount: finalDiscount, discountPercent, subtotal, total: invoiceTotal, amountDue, items: itemsToSave, createdAt: new Date(), createdBy: (auth && auth.currentUser) ? auth.currentUser.uid : null };
                             // 1) READ all required product docs first
                             const productUpdates = [];
                             for (const item of itemsToSave) {
@@ -5737,6 +5924,7 @@
                                 // Skip inventory updates for new products (quantity = 0)
                                 if (currentQty > 0) {
                                     productUpdates.push({ productRef, newQuantity });
+                                    productsWithInventory.push(item.productId); // Track for stock movements
                                 }
                             }
                             // 2) WRITE: create invoice
@@ -5746,16 +5934,13 @@
                                 transaction.update(upd.productRef, { quantity: upd.newQuantity });
                             }
                         });
+                        
                         // 3. Create stock movement OUT entries after successful transaction (only for existing products)
+                        // Use tracked productsWithInventory instead of re-reading
                         const createdBy = (auth && auth.currentUser) ? auth.currentUser.uid : null;
                         for (const item of itemsToSave) {
-                            // Check if this is an existing product (has inventory)
-                            const productRef = doc(db, 'products', item.productId);
-                            const productDoc = await getDoc(productRef);
-                            const currentQty = Number(productDoc.data().quantity || 0);
-                            
-                            // Only create stock movements for existing products with inventory
-                            if (currentQty > 0) {
+                            // Only create stock movements for products that had inventory (tracked during transaction)
+                            if (productsWithInventory.includes(item.productId)) {
                                 await addDoc(collection(db, 'stockMovements'), {
                                     productId: item.productId,
                                     quantity: item.quantity,
@@ -5768,6 +5953,7 @@
                                 });
                             }
                         }
+                        
                         // 4. Record payment entry if provided
                         if (paidAmount > 0) {
                             await addDoc(collection(db, 'payments'), {
@@ -5779,18 +5965,63 @@
                                 createdBy
                             });
                         }
-                        await recalcInvoicePaymentState(invoiceRef.id);
+                        
+                        // Recalc payment state using invoice data we already have (avoid re-reading)
+                        console.log('[Quota Usage] Recalculating payment state...');
+                        // Get the updated invoice data with recalculated payment state
+                        const recalculatedNewInvoiceData = await recalcInvoicePaymentState(invoiceRef.id, newInvoiceData);
+                        console.log('[Quota Usage] Payment state recalculated');
+                        
+                        // Use recalculated data if available, otherwise fall back to newInvoiceData
+                        const finalInvoiceData = recalculatedNewInvoiceData 
+                            ? { ...recalculatedNewInvoiceData, id: invoiceRef.id }
+                            : { ...newInvoiceData, id: invoiceRef.id };
+                        
+                        // Update local cache instead of full refetch to save quota
+                        if (!invoiceData) invoiceData = {};
+                        invoiceData[invoiceRef.id] = finalInvoiceData;
+                        if (!allInvoices) allInvoices = [];
+                        allInvoices.unshift({ id: invoiceRef.id, invoice: finalInvoiceData });
+                        if (!filteredInvoices) filteredInvoices = [];
+                        filteredInvoices.unshift({ id: invoiceRef.id, invoice: finalInvoiceData });
+                        displayFilteredInvoices(filteredInvoices);
+                        
+                        // Update product quantities in local cache
+                        for (const item of itemsToSave) {
+                            if (productsWithInventory.includes(item.productId)) {
+                                const productIndex = productsCache.findIndex(p => p.id === item.productId);
+                                if (productIndex >= 0) {
+                                    productsCache[productIndex].quantity = (productsCache[productIndex].quantity || 0) - Number(item.quantity || 0);
+                                }
+                                const allProductIndex = allProducts.findIndex(p => p.id === item.productId);
+                                if (allProductIndex >= 0) {
+                                    allProducts[allProductIndex].quantity = (allProducts[allProductIndex].quantity || 0) - Number(item.quantity || 0);
+                                }
+                            }
+                        }
+                        displayFilteredProducts(filteredProducts || allProducts);
                     }
 
                     console.log("Invoice and stock update successful!");
-                    await fetchAndDisplayInvoices();
-                    await fetchAndDisplayProducts();
+                    // Removed full refetch - using local cache updates instead to save quota
                     if (typeof calculateSalesAnalytics === 'function') calculateSalesAnalytics();
                     hideAddModal();
 
                 } catch (error) {
                     console.error("Transaction failed: ", error);
-                    alert("فشل حفظ الفاتورة: " + error);
+                    let errorMessage = "فشل حفظ الفاتورة: " + error;
+                    if (error.code === 'resource-exhausted' || error.message.includes('Quota exceeded')) {
+                        errorMessage = "تم تجاوز الحد المسموح من قاعدة البيانات (Quota exceeded).\n\n" +
+                            "السبب المحتمل:\n" +
+                            "- تم استهلاك الحد اليومي من عمليات القراءة/الكتابة\n" +
+                            "- عدد كبير من المنتجات أو الفواتير\n\n" +
+                            "الحلول:\n" +
+                            "1. انتظر حتى يتم إعادة تعيين الحد اليومي (عادة في منتصف الليل)\n" +
+                            "2. ترقية خطة Firebase إلى Blaze (Pay as you go)\n" +
+                            "3. تقليل عدد المنتجات في الفاتورة الواحدة\n" +
+                            "4. التحقق من استخدام قاعدة البيانات في Firebase Console";
+                    }
+                    alert(errorMessage);
                 } finally {
                     saveInvoiceBtn.disabled = false;
                     saveInvoiceBtn.textContent = 'حفظ الفاتورة';
