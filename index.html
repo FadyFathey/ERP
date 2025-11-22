@@ -739,7 +739,10 @@
                 <div id="inventory-page" class="page hidden">
                    <div class="flex justify-between items-center mb-6">
                         <h2 class="text-2xl font-semibold">إدارة المخزون</h2>
-                        <button id="add-product-btn" class="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600">إضافة منتج جديد</button>
+                        <div class="flex gap-2">
+                            <button id="add-product-btn" class="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600">إضافة منتج جديد</button>
+                            <button id="delete-all-inventory-btn" class="bg-red-500 text-white px-4 py-2 rounded-md hover:bg-red-600">حذف جميع المنتجات</button>
+                        </div>
                     </div>
                     
                     <!-- Search and Filter Section -->
@@ -817,9 +820,10 @@
                     <!-- Inline Product Creation Form -->
                     <div id="inline-product-form" class="bg-blue-50 p-4 rounded-lg mb-6 hidden">
                         <h3 class="text-lg font-semibold text-blue-800 mb-4">إضافة منتج جديد</h3>
-                        <form id="quick-add-product-form" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <form id="quick-add-product-form" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                             <input id="inline-product-name" type="text" placeholder="اسم المنتج" class="px-3 py-2 border rounded-lg focus:outline-none" required>
                             <input id="inline-product-sku" type="text" placeholder="SKU (الكود التعريفي)" class="px-3 py-2 border rounded-lg focus:outline-none" required>
+                            <input id="inline-product-quantity" type="number" min="0" placeholder="الكمية الإجمالية" class="px-3 py-2 border rounded-lg focus:outline-none" required>
                             <input id="inline-product-website-price" type="number" step="0.01" min="0" placeholder="سعر الموقع/المعرض" class="px-3 py-2 border rounded-lg focus:outline-none" required>
                             <input id="inline-product-amazon-price" type="number" step="0.01" min="0" placeholder="سعر أمازون" class="px-3 py-2 border rounded-lg focus:outline-none" required>
                             <div class="flex gap-2">
@@ -1422,6 +1426,7 @@
                             <option value="المتجر الفعلي">المتجر الفعلي</option>
                             <option value="Website">Website</option>
                             <option value="Amazon">Amazon</option>
+                            <option value="المشتريات">المشتريات (فاتورة شراء)</option>
                         </select>
                         <select id="payment-method" class="w-full px-3 py-2 text-gray-700 border rounded-lg focus:outline-none" required>
                             <option value="" disabled selected>اختر طريقة الدفع</option>
@@ -2713,7 +2718,11 @@
             return filtered;
         };
         
-        const displayFilteredInvoices = (invoices) => {
+        // Pagination state
+        let currentInvoicePage = {};
+        const INVOICES_PER_PAGE = 25; // Show 25 invoices per group initially
+        
+        const displayFilteredInvoices = (invoices, page = {}) => {
             if (!salesGroupsContainer) return;
             
             salesGroupsContainer.innerHTML = '';
@@ -2746,10 +2755,17 @@
                 grouped[invoice.paymentStatus || 'غير مدفوع'].push({ id: invoiceId, invoice });
             });
             
-            // Display grouped invoices
+            // Display grouped invoices with pagination
             groups.forEach(group => {
                 const list = grouped[group.key] || [];
                 if (list.length === 0) return;
+                
+                // Get current page for this group
+                const groupPage = page[group.key] || currentInvoicePage[group.key] || 1;
+                const startIndex = (groupPage - 1) * INVOICES_PER_PAGE;
+                const endIndex = startIndex + INVOICES_PER_PAGE;
+                const displayedList = list.slice(startIndex, endIndex);
+                const totalPages = Math.ceil(list.length / INVOICES_PER_PAGE);
                 
                 const section = document.createElement('div');
                 section.className = 'mb-8';
@@ -2759,7 +2775,7 @@
                             <span class="w-1 h-6 bg-gradient-to-b from-blue-500 to-indigo-600 rounded-full"></span>
                             ${group.title}
                         </h3>
-                        <span class="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-sm font-medium">${list.length} فاتورة</span>
+                        <span class="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-sm font-medium">${list.length} فاتورة (عرض ${startIndex + 1}-${Math.min(endIndex, list.length)} من ${list.length})</span>
                     </div>
                     <div class="border-t border-gray-200 mb-4"></div>
                     <div class="overflow-x-auto">
@@ -2780,9 +2796,20 @@
                             <tbody class="group-body bg-white"></tbody>
                         </table>
                     </div>
+                    ${totalPages > 1 ? `
+                        <div class="mt-4 flex justify-center items-center gap-2 pagination-controls" data-group="${group.key}">
+                            <button class="px-3 py-1 border rounded-md ${groupPage === 1 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-white text-gray-700 hover:bg-gray-50'}" 
+                                    ${groupPage === 1 ? 'disabled' : ''} 
+                                    onclick="loadInvoicePage('${group.key}', ${groupPage - 1})">السابق</button>
+                            <span class="px-4 py-1 text-gray-700">صفحة ${groupPage} من ${totalPages}</span>
+                            <button class="px-3 py-1 border rounded-md ${groupPage >= totalPages ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-white text-gray-700 hover:bg-gray-50'}" 
+                                    ${groupPage >= totalPages ? 'disabled' : ''} 
+                                    onclick="loadInvoicePage('${group.key}', ${groupPage + 1})">التالي</button>
+                        </div>
+                    ` : ''}
                 `;
                 const tbody = section.querySelector('.group-body');
-                list.forEach(({ id: invoiceId, invoice }, index) => {
+                displayedList.forEach(({ id: invoiceId, invoice }, index) => {
                     if (!invoice) {
                         console.warn('Invoice data is undefined for ID:', invoiceId);
                         return;
@@ -2827,7 +2854,7 @@
                     const priorityIcon = isOverdue ? '<span class="priority-indicator text-red-500 text-sm" title="فاتورة متأخرة">🚨</span>' : '';
                     
                     tr.innerHTML = `
-                        <td class="p-4 text-center font-semibold text-gray-600 transition-colors duration-200">${index + 1}</td>
+                        <td class="p-4 text-center font-semibold text-gray-600 transition-colors duration-200">${startIndex + index + 1}</td>
                         <td class="p-4 font-medium transition-colors duration-200">
                             <div class="flex items-center gap-2">
                                 ${priorityIcon}
@@ -2861,6 +2888,23 @@
             if (searchResultsCount) {
                 searchResultsCount.textContent = invoices.length.toString();
             }
+            
+            // Store current page state
+            Object.keys(currentInvoicePage).forEach(key => {
+                if (!page[key]) delete currentInvoicePage[key];
+            });
+            Object.assign(currentInvoicePage, page);
+        };
+        
+        // Function to load a specific page for a group
+        window.loadInvoicePage = function(groupKey, pageNum) {
+            currentInvoicePage[groupKey] = pageNum;
+            displayFilteredInvoices(filteredInvoices, currentInvoicePage);
+            // Scroll to top of the section
+            const section = document.querySelector(`[data-group="${groupKey}"]`)?.closest('.mb-8');
+            if (section) {
+                section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
         };
         
         const performSearch = () => {
@@ -2878,8 +2922,11 @@
             // Apply filters to all invoices
             filteredInvoices = applySearchFilters(allInvoices);
             
-            // Display filtered results
-            displayFilteredInvoices(filteredInvoices);
+            // Reset pagination when filters change
+            currentInvoicePage = {};
+            
+            // Display filtered results (starting from page 1)
+            displayFilteredInvoices(filteredInvoices, {});
         };
         
         const clearAllFilters = () => {
@@ -2912,7 +2959,11 @@
             
             // Reset to show all invoices
             filteredInvoices = [...allInvoices];
-            displayFilteredInvoices(filteredInvoices);
+            
+            // Reset pagination
+            currentInvoicePage = {};
+            
+            displayFilteredInvoices(filteredInvoices, {});
         };
         
         // --- INVENTORY SEARCH AND FILTER FUNCTIONS ---
@@ -3119,9 +3170,121 @@
             if (!db) return;
             
             try {
-                // Fetch all invoices
-                const q = query(collection(db, "invoices"));
+                // OPTIMIZATION: Use cached invoice data instead of querying Firestore
+                // This saves hundreds of reads per analytics calculation
+                if (invoiceData && Object.keys(invoiceData).length > 0) {
+                    console.log('[Quota Usage] Using cached invoices for analytics (0 reads)');
+                    // Use cached data
+                    const cachedInvoices = Object.entries(invoiceData).map(([id, invoice]) => ({
+                        id,
+                        data: () => invoice
+                    }));
+                    
+                    // Process cached invoices
+                    let totalRevenue = 0;
+                    let totalPaid = 0;
+                    let totalAmountDue = 0;
+                    let unpaidCount = 0;
+                    let totalInvoices = 0;
+                    let todaySales = 0;
+                    let customers = new Set();
+                    let monthlyData = {};
+                    let paymentStatusData = { 'غير مدفوع': 0, 'مدفوع جزئياً': 0, 'مدفوع بالكامل': 0 };
+                    let customerTotals = {};
+                    let productTotals = {};
+                    let channelData = {
+                        'المتجر الفعلي': { revenue: 0, invoices: 0, total: 0 },
+                        'Website': { revenue: 0, invoices: 0, total: 0 },
+                        'Amazon': { revenue: 0, invoices: 0, total: 0 },
+                        'المشتريات': { revenue: 0, invoices: 0, total: 0 },
+                        'Other': { revenue: 0, invoices: 0, total: 0 }
+                    };
+                    
+                    // Get today's date for filtering
+                    const today = new Date();
+                    const todayStr = today.toISOString().split('T')[0];
+                    
+                    cachedInvoices.forEach((docSnap) => {
+                        const invoice = docSnap.data();
+                        if (invoice.voided) return; // Skip voided invoices
+                        
+                        const total = Number(invoice.total || 0);
+                        const paidAmount = Number(invoice.paidAmount || 0);
+                        const amountDue = Number(invoice.amountDue || 0);
+                        
+                        totalRevenue += total;
+                        totalPaid += paidAmount;
+                        totalAmountDue += amountDue;
+                        totalInvoices++;
+                        
+                        if (invoice.paymentStatus === 'غير مدفوع') unpaidCount++;
+                        paymentStatusData[invoice.paymentStatus || 'غير مدفوع'] = (paymentStatusData[invoice.paymentStatus || 'غير مدفوع'] || 0) + 1;
+                        
+                        if (invoice.customer) customers.add(invoice.customer);
+                        if (invoice.customer) {
+                            customerTotals[invoice.customer] = (customerTotals[invoice.customer] || 0) + total;
+                        }
+                        
+                        if (invoice.date && invoice.date.startsWith(todayStr)) {
+                            todaySales += total;
+                        }
+                        
+                        const invoiceDate = new Date(invoice.date || invoice.createdAt);
+                        const monthKey = `${invoiceDate.getFullYear()}-${String(invoiceDate.getMonth() + 1).padStart(2, '0')}`;
+                        monthlyData[monthKey] = (monthlyData[monthKey] || 0) + total;
+                        
+                        const channel = invoice.channel || 'Other';
+                        if (channelData[channel]) {
+                            channelData[channel].revenue += total;
+                            channelData[channel].invoices++;
+                            channelData[channel].total += total;
+                        } else {
+                            channelData['Other'].revenue += total;
+                            channelData['Other'].invoices++;
+                            channelData['Other'].total += total;
+                        }
+                        
+                        if (invoice.items && Array.isArray(invoice.items)) {
+                            invoice.items.forEach(item => {
+                                const productName = item.productName || 'Unknown';
+                                productTotals[productName] = (productTotals[productName] || 0) + (Number(item.quantity || 0) * Number(item.price || 0));
+                            });
+                        }
+                    });
+                    
+                    // Update UI with analytics using same functions as Firestore path
+                    updateDashboardElements({
+                        totalRevenue,
+                        totalPaid,
+                        totalAmountDue,
+                        unpaidCount,
+                        totalInvoices,
+                        totalCustomers: customers.size,
+                        averageInvoice: totalInvoices > 0 ? totalRevenue / totalInvoices : 0,
+                        todaySales
+                    });
+                    
+                    // Update charts
+                    updateSalesChart(monthlyData);
+                    updatePaymentStatusChart(paymentStatusData);
+                    
+                    // Update top customers and products
+                    updateTopCustomers(customerTotals);
+                    updateTopProducts(productTotals);
+                    
+                    // Update channel analytics
+                    updateChannelAnalytics(channelData);
+                    
+                    return; // Exit early, don't query Firestore
+                }
+                
+                // Fallback: Only query if cache is empty (should rarely happen)
+                console.log('[Quota Usage] Cache empty, querying Firestore for analytics (WARNING: This uses many reads!)');
+                // OPTIMIZATION: Use limit to prevent excessive reads
+                const INVOICES_FOR_ANALYTICS = 200; // Limit to recent 200 invoices for analytics
+                const q = query(collection(db, "invoices"), orderBy("createdAt", "desc"), limit(INVOICES_FOR_ANALYTICS));
                 const querySnapshot = await getDocs(q);
+                console.log(`[Quota Usage] Loaded ${querySnapshot.size} invoices for analytics (${querySnapshot.size} reads)`);
                 
                 let totalRevenue = 0;
                 let totalPaid = 0;
@@ -3602,8 +3765,9 @@
                 // Update cache timestamp
                 invoicesLastLoaded = now;
                 
-                // Display all invoices initially
-                displayFilteredInvoices(filteredInvoices);
+                // Display all invoices initially (page 1)
+                currentInvoicePage = {};
+                displayFilteredInvoices(filteredInvoices, {});
                 
             } catch (error) {
                 console.error("Error fetching invoices: ", error);
@@ -3666,9 +3830,14 @@
                     productsCache = []; // Clear cache before fetching
                     allProducts = []; // Clear all products array
                 }
+                // NOTE: We load ALL products because they're needed for:
+                // 1. Invoice creation (autocomplete dropdown)
+                // 2. Purchase creation (autocomplete dropdown)
+                // 3. Inventory management
+                // The 5-minute cache prevents reloads, so this only happens once per session
                 const q = query(collection(db, "products"), orderBy("createdAt", "desc"));
                 const querySnapshot = await getDocs(q);
-                console.log(`[Quota Usage] Loaded ${querySnapshot.size} products (${querySnapshot.size} reads)`);
+                console.log(`[Quota Usage] Loaded ${querySnapshot.size} products (${querySnapshot.size} reads) - all products needed for invoice/purchase creation`);
                 inventoryTableBody.innerHTML = '';
                 if (querySnapshot.empty) {
                     inventoryTableBody.innerHTML = '<tr><td colspan="9" class="p-4 text-center text-gray-500">لا توجد منتجات بالمخزن.</td></tr>';
@@ -4566,7 +4735,8 @@
                             if (filteredIndex >= 0) {
                                 filteredInvoices[filteredIndex].invoice = { ...updatedInvoice, id: invoiceId };
                             }
-                            displayFilteredInvoices(filteredInvoices);
+                            currentInvoicePage = {};
+                            displayFilteredInvoices(filteredInvoices, {});
                         }
                         if (typeof calculateSalesAnalytics === 'function') calculateSalesAnalytics();
                         showViewModal(invoiceId);
@@ -5195,22 +5365,26 @@
                         const productSnap = await transaction.get(productRef);
                         if (!productSnap.exists()) throw new Error('المنتج غير موجود: ' + it.productId);
                         const pdata = productSnap.data();
-                        // Support single quantity or per-location quantities
-                        if (pdata && pdata.quantities && typeof pdata.quantities === 'object') {
-                            const from = it.issueFrom || 'warehouse';
-                            const currentQty = Number((pdata.quantities[from] ?? 0));
-                            if (it.quantity > currentQty) throw new Error(`الكمية المطلوبة (${it.quantity}) أكبر من المتاحة (${currentQty}) للمنتج ${it.productName}`);
-                            const newQuantities = Object.assign({}, pdata.quantities);
-                            newQuantities[from] = currentQty - it.quantity;
-                            productUpdates.push({ ref: productRef, data: { quantities: newQuantities } });
-                        } else {
-                            const currentQty = Number(pdata.quantity ?? 0);
-                            if (it.quantity > currentQty) throw new Error(`الكمية المطلوبة (${it.quantity}) أكبر من المتاحة (${currentQty}) للمنتج ${it.productName}`);
-                            productUpdates.push({ ref: productRef, data: { quantity: currentQty - it.quantity } });
-                        }
+                        // DISABLED: No stock validation or updates since inventory is not updated automatically
+                        // Inventory should only be updated manually from the inventory section
+                        // Stock movements are still recorded for tracking purposes but don't affect inventory quantities
+                        // if (pdata && pdata.quantities && typeof pdata.quantities === 'object') {
+                        //     const from = it.issueFrom || 'warehouse';
+                        //     const currentQty = Number((pdata.quantities[from] ?? 0));
+                        //     if (it.quantity > currentQty) throw new Error(`الكمية المطلوبة (${it.quantity}) أكبر من المتاحة (${currentQty}) للمنتج ${it.productName}`);
+                        //     const newQuantities = Object.assign({}, pdata.quantities);
+                        //     newQuantities[from] = currentQty - it.quantity;
+                        //     productUpdates.push({ ref: productRef, data: { quantities: newQuantities } });
+                        // } else {
+                        //     const currentQty = Number(pdata.quantity ?? 0);
+                        //     if (it.quantity > currentQty) throw new Error(`الكمية المطلوبة (${it.quantity}) أكبر من المتاحة (${currentQty}) للمنتج ${it.productName}`);
+                        //     productUpdates.push({ ref: productRef, data: { quantity: currentQty - it.quantity } });
+                        // }
                     }
                     // Apply product updates
-                    for (const u of productUpdates) transaction.update(u.ref, u.data);
+                    // DISABLED: Do NOT update product quantities automatically
+                    // Inventory should only be updated manually from the inventory section
+                    // for (const u of productUpdates) transaction.update(u.ref, u.data);
                     
                     // Persist counter
                     transaction.set(counterRef, { count: next }, { merge: true });
@@ -5404,7 +5578,9 @@
                             updates.push({ ref: productRef, data: { quantity: currentQty + Number(it.quantity || 0) } });
                         }
                     }
-                    for (const u of updates) transaction.update(u.ref, u.data);
+                    // DISABLED: Do NOT update product quantities automatically
+                    // Inventory should only be updated manually from the inventory section
+                    // for (const u of updates) transaction.update(u.ref, u.data);
                     // Mark void
                     transaction.set(stockOutRef, { status: 'void', voidedAt: serverTimestamp(), voidedBy: createdBy, voidReason: reason }, { merge: true });
                     // Write reversal movements
@@ -5585,8 +5761,11 @@
                     }
                     // WRITE: delete invoice completely
                     transaction.delete(invoiceRef);
-                    // WRITE: update product quantities
-                    updates.forEach(u => transaction.update(u.productRef, { quantity: u.newQty }));
+                    // Restore product quantities ONLY if it was a purchase invoice
+                    const invoiceChannel = inv.channel;
+                    if (invoiceChannel === 'المشتريات') {
+                        updates.forEach(u => transaction.update(u.productRef, { quantity: u.newQty }));
+                    }
                 });
                 // Side effects after transaction: stockMovements IN, delete payments
                 // Use the invoice data we already fetched before deletion
@@ -5882,7 +6061,8 @@
                         if (filteredIndex >= 0) {
                             filteredInvoices[filteredIndex].invoice = { ...finalInvoiceData, id: currentEditingInvoiceId };
                         }
-                        displayFilteredInvoices(filteredInvoices);
+                        currentInvoicePage = {};
+                        displayFilteredInvoices(filteredInvoices, {});
                     } else {
                         // Pre-create invoice ref to capture ID for stock movements
                         const invoiceRef = doc(collection(db, 'invoices'));
@@ -5904,6 +6084,10 @@
                         const productsWithInventory = [];
                         
                         console.log(`[Quota Usage] Starting transaction with ${itemsToSave.length} items...`);
+                        
+                        // Check if this is a purchase invoice (channel = "المشتريات")
+                        const isPurchaseInvoice = channel === 'المشتريات';
+                        
                         await runTransaction(db, async (transaction) => {
                             // 1) READ all required product docs first
                             const productUpdates = [];
@@ -5911,27 +6095,35 @@
                                 const productRef = doc(db, 'products', item.productId);
                                 const productDoc = await transaction.get(productRef);
                                 if (!productDoc.exists()) { throw `المنتج ${item.productName} غير موجود!`; }
-                                const currentQty = Number(productDoc.data().quantity || 0);
-                                const newQuantity = currentQty - Number(item.quantity || 0);
                                 
-                                // Only check stock quantity for existing products with positive quantities
-                                // Skip validation for new products (quantity = 0) to allow adding new products to invoices
-                                if (currentQty > 0 && newQuantity < 0) { 
-                                    throw `الكمية غير كافية للمنتج: ${item.productName}`; 
-                                }
-                                
-                                // Only update inventory for existing products (quantity > 0)
-                                // Skip inventory updates for new products (quantity = 0)
-                                if (currentQty > 0) {
-                                    productUpdates.push({ productRef, newQuantity });
-                                    productsWithInventory.push(item.productId); // Track for stock movements
+                                // For purchase invoices: automatically decrease inventory
+                                if (isPurchaseInvoice) {
+                                    const currentQty = Number(productDoc.data().quantity || 0);
+                                    const newQuantity = currentQty - Number(item.quantity || 0);
+                                    
+                                    // Check stock quantity for purchase invoices
+                                    if (currentQty > 0 && newQuantity < 0) { 
+                                        throw `الكمية غير كافية للمنتج: ${item.productName}. المتاح: ${currentQty}, المطلوب: ${item.quantity}`; 
+                                    }
+                                    
+                                    // Only update inventory for existing products with positive quantities
+                                    if (currentQty > 0) {
+                                        productUpdates.push({ productRef, newQuantity });
+                                        productsWithInventory.push(item.productId);
+                                    }
+                                } else {
+                                    // For sales invoices: no automatic inventory updates
+                                    // Track products for stock movement records (for tracking purposes only)
+                                    productsWithInventory.push(item.productId);
                                 }
                             }
                             // 2) WRITE: create invoice
                             transaction.set(invoiceRef, newInvoiceData);
-                            // 3) WRITE: update product quantities (only for existing products)
-                            for (const upd of productUpdates) {
-                                transaction.update(upd.productRef, { quantity: upd.newQuantity });
+                            // 3) WRITE: update product quantities ONLY for purchase invoices
+                            if (isPurchaseInvoice) {
+                                for (const upd of productUpdates) {
+                                    transaction.update(upd.productRef, { quantity: upd.newQuantity });
+                                }
                             }
                         });
                         
@@ -5984,27 +6176,36 @@
                         allInvoices.unshift({ id: invoiceRef.id, invoice: finalInvoiceData });
                         if (!filteredInvoices) filteredInvoices = [];
                         filteredInvoices.unshift({ id: invoiceRef.id, invoice: finalInvoiceData });
-                        displayFilteredInvoices(filteredInvoices);
+                        currentInvoicePage = {};
+                        displayFilteredInvoices(filteredInvoices, {});
                         
-                        // Update product quantities in local cache
-                        for (const item of itemsToSave) {
-                            if (productsWithInventory.includes(item.productId)) {
-                                const productIndex = productsCache.findIndex(p => p.id === item.productId);
-                                if (productIndex >= 0) {
-                                    productsCache[productIndex].quantity = (productsCache[productIndex].quantity || 0) - Number(item.quantity || 0);
-                                }
-                                const allProductIndex = allProducts.findIndex(p => p.id === item.productId);
-                                if (allProductIndex >= 0) {
-                                    allProducts[allProductIndex].quantity = (allProducts[allProductIndex].quantity || 0) - Number(item.quantity || 0);
+                        // Update product quantities in local cache ONLY for purchase invoices
+                        if (isPurchaseInvoice) {
+                            for (const item of itemsToSave) {
+                                if (productsWithInventory.includes(item.productId)) {
+                                    const productIndex = productsCache.findIndex(p => p.id === item.productId);
+                                    if (productIndex >= 0) {
+                                        productsCache[productIndex].quantity = (productsCache[productIndex].quantity || 0) - Number(item.quantity || 0);
+                                    }
+                                    const allProductIndex = allProducts.findIndex(p => p.id === item.productId);
+                                    if (allProductIndex >= 0) {
+                                        allProducts[allProductIndex].quantity = (allProducts[allProductIndex].quantity || 0) - Number(item.quantity || 0);
+                                    }
                                 }
                             }
+                            displayFilteredProducts(filteredProducts || allProducts);
                         }
-                        displayFilteredProducts(filteredProducts || allProducts);
                     }
 
                     console.log("Invoice and stock update successful!");
                     // Removed full refetch - using local cache updates instead to save quota
-                    if (typeof calculateSalesAnalytics === 'function') calculateSalesAnalytics();
+                    // OPTIMIZATION: Analytics now uses cached data (0 reads) instead of querying all invoices
+                    // Only update if on dashboard page to avoid unnecessary calculations
+                    const currentPage = document.querySelector('.page:not(.hidden)');
+                    if (currentPage && currentPage.id === 'dashboard-page' && typeof calculateSalesAnalytics === 'function') {
+                        // Use setTimeout to avoid blocking, analytics uses cache so it's fast
+                        setTimeout(() => calculateSalesAnalytics(), 100);
+                    }
                     hideAddModal();
 
                 } catch (error) {
@@ -6230,6 +6431,7 @@
         // Inventory Section
         const productModal = document.getElementById('product-modal');
         const addProductBtn = document.getElementById('add-product-btn');
+        const deleteAllInventoryBtn = document.getElementById('delete-all-inventory-btn');
         const cancelProductBtn = document.getElementById('cancel-product-btn');
         const saveProductBtn = document.getElementById('save-product-btn');
         const addProductForm = document.getElementById('add-product-form');
@@ -6256,6 +6458,90 @@
                 document.getElementById('inline-product-name').focus();
             }
         });
+        
+        // Delete All Inventory Button
+        if(deleteAllInventoryBtn) {
+            deleteAllInventoryBtn.addEventListener('click', async () => {
+                // Strong confirmation - this is a destructive operation
+                const firstConfirm = confirm(
+                    '⚠️ تحذير: هذا الإجراء سيحذف جميع المنتجات من قاعدة البيانات نهائياً!\n\n' +
+                    'هل أنت متأكد تماماً من أنك تريد حذف جميع المنتجات؟\n\n' +
+                    'هذا الإجراء لا يمكن التراجع عنه!'
+                );
+                
+                if (!firstConfirm) return;
+                
+                // Second confirmation for extra safety
+                const secondConfirm = confirm(
+                    '⚠️ تأكيد نهائي:\n\n' +
+                    'سيتم حذف جميع المنتجات من قاعدة البيانات.\n' +
+                    'هذا الإجراء لا يمكن التراجع عنه!\n\n' +
+                    'اضغط "موافق" فقط إذا كنت متأكداً 100%'
+                );
+                
+                if (!secondConfirm) return;
+                
+                // Final confirmation with product count
+                try {
+                    if (!db) {
+                        alert('خطأ: قاعدة البيانات غير متاحة.');
+                        return;
+                    }
+                    
+                    // Get product count
+                    const productsQuery = query(collection(db, 'products'));
+                    const productsSnapshot = await getDocs(productsQuery);
+                    const productCount = productsSnapshot.size;
+                    
+                    if (productCount === 0) {
+                        alert('لا توجد منتجات للحذف.');
+                        return;
+                    }
+                    
+                    const finalConfirm = confirm(
+                        `⚠️ التحذير الأخير:\n\n` +
+                        `سيتم حذف ${productCount} منتج من قاعدة البيانات نهائياً.\n\n` +
+                        `اضغط "موافق" فقط إذا كنت متأكداً تماماً!`
+                    );
+                    
+                    if (!finalConfirm) return;
+                    
+                    // Disable button and show loading
+                    deleteAllInventoryBtn.disabled = true;
+                    deleteAllInventoryBtn.textContent = 'جاري الحذف...';
+                    
+                    // Delete all products
+                    const deletePromises = [];
+                    productsSnapshot.forEach((docSnap) => {
+                        deletePromises.push(deleteDoc(doc(db, 'products', docSnap.id)));
+                    });
+                    
+                    await Promise.all(deletePromises);
+                    
+                    // Clear local cache
+                    productsCache = [];
+                    allProducts = [];
+                    filteredProducts = [];
+                    
+                    // Refresh display
+                    await fetchAndDisplayProducts(true, true); // Force reload
+                    
+                    // Reset button
+                    deleteAllInventoryBtn.disabled = false;
+                    deleteAllInventoryBtn.textContent = 'حذف جميع المنتجات';
+                    
+                    alert(`✅ تم حذف ${productCount} منتج بنجاح من قاعدة البيانات.`);
+                    
+                } catch (error) {
+                    console.error('Error deleting all products:', error);
+                    alert('❌ حدث خطأ أثناء حذف المنتجات: ' + error.message);
+                    
+                    // Reset button
+                    deleteAllInventoryBtn.disabled = false;
+                    deleteAllInventoryBtn.textContent = 'حذف جميع المنتجات';
+                }
+            });
+        }
         function closeAndResetProductModal() { 
             productModal.classList.add('hidden'); 
             addProductForm.reset(); 
@@ -6309,11 +6595,17 @@
                 
                 const name = document.getElementById('inline-product-name').value.trim();
                 const sku = document.getElementById('inline-product-sku').value.trim();
+                const quantity = Number(document.getElementById('inline-product-quantity').value || 0);
                 const websitePrice = Number(document.getElementById('inline-product-website-price').value);
                 const amazonPrice = Number(document.getElementById('inline-product-amazon-price').value);
                 
                 if (!name || !sku) {
-                    alert('الرجاء ملء جميع الحقول المطلوبة.');
+                    alert('الرجاء ملء جميع الحقول المطلوبة (الاسم و SKU).');
+                    return;
+                }
+                
+                if (isNaN(quantity) || quantity < 0) {
+                    alert('الرجاء إدخال كمية صحيحة (0 أو أكبر).');
                     return;
                 }
                 
@@ -6331,13 +6623,13 @@
                         return; 
                     }
                     
-                    // Create the product using the same logic as purchase invoices
+                    // Create the product with the entered quantity
                     const newProduct = {
                         name,
                         sku,
                         websitePrice: websitePrice || 0,
                         amazonPrice: amazonPrice || 0,
-                        quantity: 0, // New products start with 0 quantity
+                        quantity: quantity, // Use the quantity entered by the user
                         category: 'عام',
                         createdAt: new Date(),
                         createdBy: (auth && auth.currentUser) ? auth.currentUser.uid : null
@@ -7367,15 +7659,16 @@
                         createdBy
                     });
                     
-                    // Update product total quantity
-                    const productRef = doc(db, 'products', item.productId);
-                    const productSnap = await getDoc(productRef);
-                    if (productSnap.exists()) {
-                        const currentQty = Number(productSnap.data().quantity || 0);
-                        await setDoc(productRef, { 
-                            quantity: currentQty + quantity 
-                        }, { merge: true });
-                    }
+                    // DISABLED: Do NOT update product total quantity automatically
+                    // Inventory should only be updated manually from the inventory section
+                    // const productRef = doc(db, 'products', item.productId);
+                    // const productSnap = await getDoc(productRef);
+                    // if (productSnap.exists()) {
+                    //     const currentQty = Number(productSnap.data().quantity || 0);
+                    //     await setDoc(productRef, { 
+                    //         quantity: currentQty + quantity 
+                    //     }, { merge: true });
+                    // }
                     
                     allocatedPerItem[idx] = quantity;
                 }
@@ -7891,12 +8184,14 @@
                                     createdBy
                                 });
                                 allocatedPerItem[idx] += a.qty;
-                                const pRef = doc(db, 'products', it.productId);
-                                const pSnap = await getDoc(pRef);
-                                if (pSnap.exists()) {
-                                    const cur = Number(pSnap.data().quantity || 0);
-                                    await setDoc(pRef, { quantity: cur + a.qty }, { merge: true });
-                                }
+                                // DISABLED: Do NOT update product quantity automatically
+                                // Inventory should only be updated manually from the inventory section
+                                // const pRef = doc(db, 'products', it.productId);
+                                // const pSnap = await getDoc(pRef);
+                                // if (pSnap.exists()) {
+                                //     const cur = Number(pSnap.data().quantity || 0);
+                                //     await setDoc(pRef, { quantity: cur + a.qty }, { merge: true });
+                                // }
                             }
                         }
                     }
